@@ -1,0 +1,26 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function userDoc(uid) {
+      return firestore.get(/databases/(default)/documents/users/$(uid));
+    }
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return isSignedIn() && userDoc(request.auth.uid).data.role == "admin";
+    }
+    function isStudent() {
+      return isSignedIn() && userDoc(request.auth.uid).data.role == "student";
+    }
+    function myStudentId() {
+      return userDoc(request.auth.uid).data.studentId;
+    }
+
+    match /payment-slips/{studentId}/{fileName} {
+      allow read: if isAdmin() || (isStudent() && myStudentId() == studentId);
+      allow write: if isStudent() && myStudentId() == studentId;
+    }
+  }
+}
+

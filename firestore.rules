@@ -1,0 +1,54 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function userDoc(uid) {
+      return get(/databases/$(database)/documents/users/$(uid));
+    }
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return isSignedIn() && userDoc(request.auth.uid).data.role == "admin";
+    }
+    function isStudent() {
+      return isSignedIn() && userDoc(request.auth.uid).data.role == "student";
+    }
+    function myStudentId() {
+      return userDoc(request.auth.uid).data.studentId;
+    }
+
+    match /users/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow write: if isAdmin(); // admin sets role + studentId mappings
+    }
+
+    match /students/{studentId} {
+      allow read: if isAdmin() || (isStudent() && myStudentId() == studentId);
+      allow write: if isAdmin();
+    }
+
+    match /timetableSlots/{slotId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /sessions/{sessionId} {
+      allow read: if isAdmin() || (isStudent() && resource.data.studentId == myStudentId());
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isAdmin() || (isStudent() && resource.data.studentId == myStudentId());
+      allow create: if isStudent() && request.resource.data.studentId == myStudentId();
+      allow update, delete: if isAdmin();
+    }
+
+    match /rescheduleRequests/{id} {
+      allow read: if isAdmin() || (isStudent() && resource.data.studentId == myStudentId());
+      allow create: if isStudent() && request.resource.data.studentId == myStudentId();
+      allow update: if isAdmin(); // approval/rejection
+      allow delete: if false;
+    }
+  }
+}
+
