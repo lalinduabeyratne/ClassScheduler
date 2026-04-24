@@ -1,14 +1,13 @@
 "use client";
 
-import { signOut } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { auth } from "@/lib/firebase/client";
 import { useAuthUser } from "@/lib/firebase/useAuthUser";
 import { getUserRole } from "@/lib/roles/getUserRole";
 import { getUserDoc, qSessionsForStudent } from "@/lib/firestore/api";
 import { useFirestoreQuery } from "@/lib/firestore/hooks";
 import type { Session } from "@/lib/model/types";
+import { StudentTopNav } from "@/app/student/_components/StudentTopNav";
 
 function dayLabel(ms: number) {
   return new Intl.DateTimeFormat("en-LK", {
@@ -29,6 +28,7 @@ export default function StudentCalendarPage() {
   const router = useRouter();
   const { user, loading } = useAuthUser();
   const [checkingRole, setCheckingRole] = useState(true);
+  const [accessError, setAccessError] = useState<string | null>(null);
   const [studentId, setStudentId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -38,17 +38,35 @@ export default function StudentCalendarPage() {
       return;
     }
     (async () => {
-      const role = await getUserRole(user.uid);
-      if (role !== "student") router.replace("/admin");
-      const u = await getUserDoc(user.uid);
-      setStudentId(u?.studentId ?? null);
-      setCheckingRole(false);
+      try {
+        const role = await getUserRole(user.uid);
+        if (!role) {
+          setAccessError("Your account has no Firestore role document yet.");
+          router.replace("/login");
+          return;
+        }
+        if (role !== "student") {
+          router.replace("/admin");
+          return;
+        }
+        const u = await getUserDoc(user.uid);
+        setStudentId(u?.studentId ?? null);
+      } catch (err) {
+        setAccessError(
+          err instanceof Error
+            ? err.message
+            : "Firestore denied access while checking the student role.",
+        );
+        router.replace("/login");
+      } finally {
+        setCheckingRole(false);
+      }
     })();
   }, [loading, router, user]);
 
   const sessionsQuery = useMemo(
-    () => (studentId ? qSessionsForStudent(studentId) : null),
-    [studentId],
+    () => (studentId && !accessError ? qSessionsForStudent(studentId) : null),
+    [accessError, studentId],
   );
   const { data: sessions } = useFirestoreQuery<Session>(sessionsQuery);
 
@@ -78,30 +96,18 @@ export default function StudentCalendarPage() {
     return <div className="text-sm text-[rgb(var(--muted))]">Loading...</div>;
   }
 
+  if (accessError) {
+    return <div className="text-sm text-red-300">{accessError}</div>;
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-6 md:px-6 md:py-8">
+      <StudentTopNav />
+
       <div className="card p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="text-lg font-semibold">My calendar (next 7 days)</div>
-            <div className="mt-1 text-sm text-[rgb(var(--muted))]">
-              Upcoming sessions generated from the weekly timetable (and any approved reschedules).
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <a className="btn btn-ghost" href="/student">
-              Back
-            </a>
-            <button
-              className="btn btn-ghost"
-              onClick={async () => {
-                await signOut(auth);
-                router.replace("/login");
-              }}
-            >
-              Sign out
-            </button>
-          </div>
+        <div className="text-lg font-semibold">My calendar (next 7 days)</div>
+        <div className="mt-1 text-sm text-[rgb(var(--muted))]">
+          Upcoming sessions generated from the weekly timetable (and any approved reschedules).
         </div>
       </div>
 

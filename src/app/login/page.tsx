@@ -24,8 +24,22 @@ export default function LoginPage() {
   useEffect(() => {
     if (!loading && user) {
       (async () => {
-        const role = await getUserRole(user.uid);
-        router.replace(role === "admin" ? "/admin" : "/student");
+        try {
+          const role = await getUserRole(user.uid);
+          if (!role) {
+            setError(
+              "Your account is signed in, but Firestore is missing users/UID role data. Check the users document for this account.",
+            );
+            return;
+          }
+          router.replace(role === "admin" ? "/admin" : "/student");
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Signed in, but Firestore denied access to the role document.",
+          );
+        }
       })();
     }
   }, [loading, router, user]);
@@ -35,7 +49,15 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await signInWithEmailAndPassword(auth, email.trim(), password);
+      const result = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const role = await getUserRole(result.user.uid);
+      if (!role) {
+        setError(
+          "Signed in, but your Firestore users document is missing role data. Create users/UID with role=admin or role=student.",
+        );
+        return;
+      }
+      router.replace(role === "admin" ? "/admin" : "/student");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
@@ -44,54 +66,56 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="mx-auto max-w-md">
-      <div className="card p-6">
-        <div className="text-lg font-semibold">Login</div>
-        <p className="mt-1 text-sm text-[rgb(var(--muted))]">
-          Admin (tutor) and each student/parent have separate credentials.
-        </p>
+    <div className="mx-auto w-full max-w-7xl px-4 py-6 md:px-6 md:py-8">
+      <div className="mx-auto max-w-md">
+        <div className="card p-6">
+          <div className="text-lg font-semibold">Login</div>
+          <p className="mt-1 text-sm text-[rgb(var(--muted))]">
+            Admin (tutor) and each student/parent have separate credentials.
+          </p>
 
-        <form className="mt-6 space-y-4" onSubmit={onSubmit}>
-          <div className="space-y-1">
-            <div className="label">Email</div>
-            <input
-              className="input"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="name@example.com"
-              type="email"
-              autoComplete="email"
-              required
-            />
-          </div>
-          <div className="space-y-1">
-            <div className="label">Password</div>
-            <input
-              className="input"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              type="password"
-              autoComplete="current-password"
-              required
-            />
-          </div>
-
-          {error ? (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
-              {error}
+          <form className="mt-6 space-y-4" onSubmit={onSubmit}>
+            <div className="space-y-1">
+              <div className="label">Email</div>
+              <input
+                className="input"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@example.com"
+                type="email"
+                autoComplete="email"
+                required
+              />
             </div>
-          ) : null}
+            <div className="space-y-1">
+              <div className="label">Password</div>
+              <input
+                className="input"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                type="password"
+                autoComplete="current-password"
+                required
+              />
+            </div>
 
-          <button className="btn btn-primary w-full" disabled={!canSubmit}>
-            {submitting ? "Signing in..." : "Sign in"}
-          </button>
-        </form>
-      </div>
+            {error ? (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+                {error}
+              </div>
+            ) : null}
 
-      <div className="mt-4 text-xs text-[rgb(var(--muted))]">
-        Tip: You’ll create the admin user and student users in Firebase Auth,
-        then assign roles in Firestore.
+            <button className="btn btn-primary w-full" disabled={!canSubmit}>
+              {submitting ? "Signing in..." : "Sign in"}
+            </button>
+          </form>
+        </div>
+
+        <div className="mt-4 text-xs text-[rgb(var(--muted))]">
+          Tip: You’ll create the admin user and student users in Firebase Auth,
+          then assign roles in Firestore.
+        </div>
       </div>
     </div>
   );

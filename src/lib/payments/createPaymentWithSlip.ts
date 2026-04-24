@@ -15,6 +15,9 @@ export async function createPaymentWithSlip(args: {
     studentId: args.studentId,
     amountCents: Math.max(0, Math.trunc(args.amountCents)),
     paidAt,
+    method: "online",
+    paymentType: "single",
+    notes: "Student slip upload",
     status: "pending_verification",
     createdAt,
   });

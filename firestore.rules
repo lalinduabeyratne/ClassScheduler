@@ -16,6 +16,34 @@ service cloud.firestore {
     function myStudentId() {
       return userDoc(request.auth.uid).data.studentId;
     }
+    function slotHasValidTimeRange(slot) {
+      return slot.startTime is string
+        && slot.endTime is string
+        && slot.duration is int
+        && slot.duration > 0;
+    }
+    function slotHasStudents(slot) {
+      return slot.students is list;
+    }
+    function createSlotAllowed() {
+      return isAdmin()
+        && request.resource.data.isLocked == true
+        && request.resource.data.active is bool
+        && request.resource.data.recurring == true
+        && request.resource.data.exceptions is list
+        && slotHasValidTimeRange(request.resource.data)
+        && slotHasStudents(request.resource.data);
+    }
+    function unlockOnlyUpdateAllowed() {
+      return resource.data.isLocked == true
+        && request.resource.data.isLocked == false
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly(["isLocked"]);
+    }
+    function unlockedEditAllowed() {
+      return resource.data.isLocked == false
+        && slotHasValidTimeRange(request.resource.data)
+        && slotHasStudents(request.resource.data);
+    }
 
     match /users/{uid} {
       allow read: if isSignedIn() && request.auth.uid == uid;
@@ -29,7 +57,9 @@ service cloud.firestore {
 
     match /timetableSlots/{slotId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow create: if createSlotAllowed();
+      allow update: if isAdmin() && (unlockOnlyUpdateAllowed() || unlockedEditAllowed());
+      allow delete: if isAdmin();
     }
 
     match /sessions/{sessionId} {
@@ -39,7 +69,7 @@ service cloud.firestore {
 
     match /payments/{paymentId} {
       allow read: if isAdmin() || (isStudent() && resource.data.studentId == myStudentId());
-      allow create: if isStudent() && request.resource.data.studentId == myStudentId();
+      allow create: if (isStudent() && request.resource.data.studentId == myStudentId()) || isAdmin();
       allow update, delete: if isAdmin();
     }
 

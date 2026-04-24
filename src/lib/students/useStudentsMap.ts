@@ -11,8 +11,9 @@ export type StudentLite = {
 };
 
 export function useStudentsMap(enabled: boolean) {
+  const studentsQuery = useMemo(() => (enabled ? qStudents() : null), [enabled]);
   const { data: rawStudents, loading } = useFirestoreQuery<Record<string, unknown>>(
-    enabled ? qStudents() : null,
+    studentsQuery,
   );
 
   const students = useMemo(() => {

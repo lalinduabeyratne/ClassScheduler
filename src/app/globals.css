@@ -6,7 +6,7 @@
   --muted: 107 114 128;
   --card: 249 250 251;
   --border: 229 231 235;
-  --brand: 37 99 235;
+  --brand: 20 83 163;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -42,6 +42,15 @@ body {
   @apply inline-flex items-center justify-center rounded-lg border px-3 py-2 text-sm font-medium transition;
 }
 
+.btn:focus-visible,
+.input:focus-visible,
+a:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgb(var(--brand));
+  outline-offset: 2px;
+}
+
 .btn-primary {
   @apply border-transparent bg-[rgb(var(--brand))] text-white hover:opacity-90;
 }
@@ -56,5 +65,184 @@ body {
 
 .label {
   @apply text-sm font-medium text-[rgb(var(--muted))];
+}
+
+.status-pill {
+  @apply inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium capitalize;
+}
+
+.status-attended {
+  @apply border-emerald-400/60 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300;
+}
+
+.status-late-cancel {
+  @apply border-amber-400/60 bg-amber-500/15 text-amber-700 dark:text-amber-300;
+}
+
+.status-no-show {
+  @apply border-rose-400/60 bg-rose-500/15 text-rose-700 dark:text-rose-300;
+}
+
+.status-early-cancel {
+  @apply border-slate-400/60 bg-slate-500/10 text-slate-700 dark:text-slate-300;
+}
+
+.home-physics-bg {
+  background:
+    radial-gradient(circle at 15% 30%, rgba(37, 99, 235, 0.12), transparent 35%),
+    radial-gradient(circle at 85% 70%, rgba(99, 102, 241, 0.12), transparent 40%);
+}
+
+.physics-card {
+  background: transparent;
+}
+
+.physics-grid {
+  background-image:
+    linear-gradient(to right, rgba(148, 163, 184, 0.14) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.14) 1px, transparent 1px);
+  background-size: 42px 42px;
+}
+
+.orbit {
+  position: absolute;
+  border: 1px solid rgba(59, 130, 246, 0.38);
+  border-radius: 9999px;
+  animation: orbitPulse 6s ease-in-out infinite;
+}
+
+.orbit-lg {
+  width: 520px;
+  height: 520px;
+  top: -260px;
+  right: -180px;
+}
+
+.orbit-md {
+  width: 360px;
+  height: 360px;
+  bottom: -190px;
+  left: -110px;
+  animation-delay: 1.2s;
+}
+
+.particle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: rgb(var(--brand));
+  box-shadow: 0 0 24px rgba(59, 130, 246, 0.7);
+}
+
+.particle-a {
+  top: 16%;
+  right: 28%;
+  animation: floatDrift 8s ease-in-out infinite;
+}
+
+.particle-b {
+  bottom: 20%;
+  left: 18%;
+  animation: floatDrift 9.5s ease-in-out infinite reverse;
+}
+
+.particle-c {
+  top: 48%;
+  right: 10%;
+  animation: floatDrift 7s ease-in-out infinite;
+}
+
+.photo-frame {
+  position: relative;
+  height: 420px;
+  overflow: hidden;
+  border-radius: 1.6rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow:
+    0 24px 50px -26px rgba(2, 6, 23, 0.65),
+    0 0 0 1px rgba(255, 255, 255, 0.28) inset;
+  animation: portraitFloat 7s ease-in-out infinite;
+}
+
+.photo-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(2, 6, 23, 0.36), transparent 42%);
+  pointer-events: none;
+}
+
+.floating-card {
+  position: absolute;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(4px);
+  padding: 0.65rem 0.85rem;
+  box-shadow: 0 12px 32px -20px rgba(15, 23, 42, 0.95);
+}
+
+.floating-card-top {
+  top: 1rem;
+  right: -1rem;
+  animation: floatDrift 5s ease-in-out infinite;
+}
+
+.floating-card-bottom {
+  bottom: 1rem;
+  left: -1.2rem;
+  animation: floatDrift 6.5s ease-in-out infinite reverse;
+}
+
+@media (prefers-color-scheme: dark) {
+  .floating-card {
+    background: rgba(15, 23, 42, 0.8);
+  }
+}
+
+.metric-chip {
+  border: 1px solid rgb(var(--border));
+  border-radius: 9999px;
+  padding: 0.45rem 0.8rem;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+@media (prefers-color-scheme: dark) {
+  .metric-chip {
+    background: rgba(15, 23, 42, 0.64);
+  }
+}
+
+@keyframes orbitPulse {
+  0%,
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.06) rotate(4deg);
+    opacity: 0.9;
+  }
+}
+
+@keyframes floatDrift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -10px, 0);
+  }
+}
+
+@keyframes portraitFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-7px);
+  }
 }
 

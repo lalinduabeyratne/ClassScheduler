@@ -6,6 +6,8 @@ export function computeChargeCents(args: {
 }): number {
   const fee = Math.max(0, Math.trunc(args.feePerSessionCents));
   switch (args.status) {
+    case "scheduled":
+      return 0;
     case "attended":
       return fee;
     case "early_cancel":

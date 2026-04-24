@@ -42,8 +42,7 @@ export function qSessionsForStudent(studentId: string): Query<Session> {
   return query(
     collection(db, col.sessions()),
     where("studentId", "==", studentId),
-    orderBy("startAt", "desc"),
-    limit(200),
+    limit(5000),
   ) as Query<Session>;
 }
 
@@ -51,8 +50,20 @@ export function qPaymentsForStudent(studentId: string): Query<Payment> {
   return query(
     collection(db, col.payments()),
     where("studentId", "==", studentId),
+    limit(5000),
+  ) as Query<Payment>;
+}
+
+export function qPaymentsBetween(args: {
+  startAtMs: number;
+  endAtMs: number;
+}): Query<Payment> {
+  return query(
+    collection(db, col.payments()),
+    where("paidAt", ">=", args.startAtMs),
+    where("paidAt", "<", args.endAtMs),
     orderBy("paidAt", "desc"),
-    limit(200),
+    limit(5000),
   ) as Query<Payment>;
 }
 
@@ -65,7 +76,7 @@ export function qSessionsBetween(args: {
     where("startAt", ">=", args.startAtMs),
     where("startAt", "<", args.endAtMs),
     orderBy("startAt", "asc"),
-    limit(500),
+    limit(5000),
   ) as Query<Session>;
 }
 
@@ -81,8 +92,6 @@ export function qPendingPayments(): Query<Payment> {
 export function qTimetableSlots(): Query<Record<string, unknown>> {
   return query(
     collection(db, col.timetableSlots()),
-    orderBy("weekday", "asc"),
-    orderBy("startTime", "asc"),
     limit(500),
   ) as Query<Record<string, unknown>>;
 }
@@ -91,6 +100,14 @@ export function qPendingRescheduleRequests(): Query<Record<string, unknown>> {
   return query(
     collection(db, col.rescheduleRequests()),
     where("status", "==", "requested"),
+    limit(200),
+  ) as Query<Record<string, unknown>>;
+}
+
+export function qRescheduleForStudent(studentId: string): Query<Record<string, unknown>> {
+  return query(
+    collection(db, col.rescheduleRequests()),
+    where("studentId", "==", studentId),
     orderBy("createdAt", "desc"),
     limit(200),
   ) as Query<Record<string, unknown>>;
