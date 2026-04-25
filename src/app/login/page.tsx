@@ -112,10 +112,6 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <div className="mt-4 text-xs text-[rgb(var(--muted))]">
-          Tip: You’ll create the admin user and student users in Firebase Auth,
-          then assign roles in Firestore.
-        </div>
       </div>
     </div>
   );

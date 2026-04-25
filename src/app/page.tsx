@@ -28,14 +28,7 @@ export default function HomePage() {
               <a className="btn btn-primary px-5 py-3" href="/login">
                 Login
               </a>
-              <a className="btn btn-ghost px-5 py-3" href="/admin">
-                Admin Portal
-              </a>
-              <a className="btn btn-ghost px-5 py-3" href="/student">
-                Student Portal
-              </a>
             </div>
-
             <div className="mt-6 flex flex-wrap gap-3 text-sm text-[rgb(var(--muted))]">
               <span className="metric-chip">Quantum-ready Timetable</span>
               <span className="metric-chip">Wave-smooth Attendance</span>
