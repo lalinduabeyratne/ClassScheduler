@@ -46,9 +46,19 @@ export default function HomePage() {
           <div className="relative mx-auto w-full max-w-sm">
             <div className="photo-frame">
               <img
-                src="/profile.jpg"
-                alt="Lalindu Abeyratne"
-                className="h-full w-full object-cover"
+                src="/slide-1-custom.jpg"
+                alt="Physics class poster 1"
+                className="slide-image slide-image-1 h-full w-full object-cover"
+              />
+              <img
+                src="/slide-2.jpg"
+                alt="Physics class poster 2"
+                className="slide-image slide-image-2 h-full w-full object-cover"
+              />
+              <img
+                src="/slide-3.jpg"
+                alt="Physics class poster 3"
+                className="slide-image slide-image-3 h-full w-full object-cover"
               />
             </div>
             <div className="floating-card floating-card-top">

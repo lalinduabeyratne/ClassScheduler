@@ -173,6 +173,25 @@ textarea:focus-visible {
   pointer-events: none;
 }
 
+.slide-image {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  animation: heroSlideShow 18s infinite;
+}
+
+.slide-image-1 {
+  animation-delay: 0s;
+}
+
+.slide-image-2 {
+  animation-delay: 6s;
+}
+
+.slide-image-3 {
+  animation-delay: 12s;
+}
+
 .floating-card {
   position: absolute;
   border-radius: 0.9rem;
@@ -243,6 +262,20 @@ textarea:focus-visible {
   }
   50% {
     transform: translateY(-7px);
+  }
+}
+
+@keyframes heroSlideShow {
+  0%,
+  28% {
+    opacity: 1;
+  }
+  33%,
+  95% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
   }
 }
 
