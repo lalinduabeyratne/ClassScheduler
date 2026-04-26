@@ -17,6 +17,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AdminTopNav } from "@/app/admin/_components/AdminTopNav";
 import { computeChargeCents } from "@/lib/billing/fee";
+import { exportStudentComprehensiveReport } from "@/lib/billing/exportPdf";
 import { allocateVerifiedPaymentsOldestFirst, computeStudentBalance } from "@/lib/billing/rollup";
 import { db, storage } from "@/lib/firebase/client";
 import { createAuthUserWithEmailPassword } from "@/lib/firebase/createAuthUser";
@@ -92,6 +93,12 @@ function yyyymmdd(d: Date) {
   return `${y}${m}${day}`;
 }
 
+function yyyymm(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
 function combineDateTimeMs(d: Date, hhmm: string) {
   const [hh, mm] = hhmm.split(":").map((x) => Number(x));
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh || 0, mm || 0).getTime();
@@ -143,6 +150,7 @@ export default function AdminStudentsPage() {
   const [editFeeLkr, setEditFeeLkr] = useState("");
   const [editSessionDuration, setEditSessionDuration] = useState("");
   const [editAssignedSlotIds, setEditAssignedSlotIds] = useState<string[]>([]);
+  const [reportMonth, setReportMonth] = useState(() => yyyymm(new Date()));
   const [saving, setSaving] = useState(false);
   const [openingSlipPaymentId, setOpeningSlipPaymentId] = useState<string | null>(null);
 
@@ -689,6 +697,24 @@ export default function AdminStudentsPage() {
     }
   }
 
+  function exportStudentReport() {
+    if (!selectedStudent) {
+      setActionError("Select a student before exporting a report.");
+      return;
+    }
+    try {
+      exportStudentComprehensiveReport({
+        student: selectedStudent,
+        month: reportMonth,
+        sessions: selectedSessions,
+        payments: selectedPayments,
+      });
+      setActionSuccess(`Report for ${reportMonth} exported successfully.`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to export report.");
+    }
+  }
+
   if (loading || checkingRole) {
     return <div className="text-sm text-[rgb(var(--muted))]">Loading...</div>;
   }
@@ -827,9 +853,21 @@ export default function AdminStudentsPage() {
                   </label>
                 ))}
               </div>
-              <div className="flex flex-wrap justify-end gap-2">
+              <div className="flex flex-wrap items-end justify-end gap-2">
+                <label className="flex flex-col gap-1 text-xs text-[rgb(var(--muted))]">
+                  Report month
+                  <input
+                    type="month"
+                    className="input w-40"
+                    value={reportMonth}
+                    onChange={(e) => setReportMonth(e.target.value)}
+                  />
+                </label>
                 <button className="btn btn-primary" onClick={onSaveStudent} disabled={saving}>
                   Save
+                </button>
+                <button className="btn btn-primary" onClick={exportStudentReport} disabled={saving}>
+                  Export Monthly Report
                 </button>
                 <button className="btn btn-ghost" onClick={onDeactivateStudent} disabled={saving}>
                   Deactivate
