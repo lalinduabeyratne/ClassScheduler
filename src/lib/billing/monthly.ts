@@ -13,21 +13,54 @@ export function computeMonthlySummary(args: {
   sessions: Session[];
   payments: Payment[];
 }): MonthlySummary {
-  const studentSessions = args.sessions.filter(
-    (s) => s.studentId === args.studentId && monthKeyFromMs(s.startAt) === args.month,
+  const [yearPart, monthPart] = args.month.split("-");
+  const year = Number(yearPart);
+  const monthIndex = Number(monthPart) - 1;
+  const monthStart = Number.isFinite(year) && Number.isFinite(monthIndex)
+    ? new Date(year, monthIndex, 1).getTime()
+    : Number.NaN;
+  const monthEnd = Number.isFinite(year) && Number.isFinite(monthIndex)
+    ? new Date(year, monthIndex + 1, 1).getTime()
+    : Number.NaN;
+
+  const inSelectedMonth = (ms: number) => {
+    if (Number.isFinite(monthStart) && Number.isFinite(monthEnd)) {
+      return ms >= monthStart && ms < monthEnd;
+    }
+    return monthKeyFromMs(ms) === args.month;
+  };
+
+  const beforeSelectedMonth = (ms: number) => {
+    if (Number.isFinite(monthStart)) {
+      return ms < monthStart;
+    }
+    return false;
+  };
+
+  const studentSessionsAll = args.sessions.filter((s) => s.studentId === args.studentId);
+  const studentPaymentsAllVerified = args.payments.filter(
+    (p) => p.studentId === args.studentId && p.status === "verified",
   );
-  const studentPayments = args.payments.filter(
-    (p) => p.studentId === args.studentId && monthKeyFromMs(p.paidAt) === args.month,
-  );
+
+  const studentSessions = studentSessionsAll.filter((s) => inSelectedMonth(s.startAt));
+  const studentPayments = studentPaymentsAllVerified.filter((p) => inSelectedMonth(p.paidAt));
+
+  const earnedBeforeMonthCents = studentSessionsAll
+    .filter((s) => beforeSelectedMonth(s.startAt))
+    .reduce((sum, s) => sum + (s.chargeCents ?? 0), 0);
+  const paidBeforeMonthCents = studentPaymentsAllVerified
+    .filter((p) => beforeSelectedMonth(p.paidAt))
+    .reduce((sum, p) => sum + (p.amountCents ?? 0), 0);
+  const openingBalanceCents = earnedBeforeMonthCents - paidBeforeMonthCents;
+
+  const totalEarnedCents = studentSessions.reduce((sum, s) => sum + (s.chargeCents ?? 0), 0);
+  const totalPaidCents = studentPayments.reduce((sum, p) => sum + (p.amountCents ?? 0), 0);
+  const closingBalanceCents = openingBalanceCents + totalEarnedCents - totalPaidCents;
 
   const totalSessions = studentSessions.length;
   const attendedCount = studentSessions.filter((s) => s.status === "attended").length;
   const lateCancelCount = studentSessions.filter((s) => s.status === "late_cancel").length;
   const noShowCount = studentSessions.filter((s) => s.status === "no_show").length;
-  const totalEarnedCents = studentSessions.reduce((sum, s) => sum + (s.chargeCents ?? 0), 0);
-  const totalPaidCents = studentPayments
-    .filter((p) => p.status === "verified")
-    .reduce((sum, p) => sum + (p.amountCents ?? 0), 0);
 
   return {
     studentId: args.studentId,
@@ -38,7 +71,11 @@ export function computeMonthlySummary(args: {
     noShowCount,
     totalEarnedCents,
     totalPaidCents,
-    balanceCents: totalEarnedCents - totalPaidCents,
+    openingBalanceCents,
+    closingBalanceCents,
+    dueCents: Math.max(0, closingBalanceCents),
+    creditCents: Math.max(0, -closingBalanceCents),
+    balanceCents: closingBalanceCents,
   };
 }
 

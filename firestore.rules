@@ -16,6 +16,19 @@ service cloud.firestore {
     function myStudentId() {
       return userDoc(request.auth.uid).data.studentId;
     }
+    function studentCanUpdateOwnPaymentSlip() {
+      return isStudent()
+        && resource.data.studentId == myStudentId()
+        && request.resource.data.studentId == resource.data.studentId
+        && resource.data.status in ["pending_verification", "rejected"]
+        && request.resource.data.status == "pending_verification"
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          "slipPath",
+          "slipUrl",
+          "status",
+          "updatedAt",
+        ]);
+    }
     function slotHasValidTimeRange(slot) {
       return slot.startTime is string
         && slot.endTime is string
@@ -46,7 +59,7 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
       allow write: if isAdmin(); // admin sets role + studentId mappings
     }
 
@@ -69,8 +82,13 @@ service cloud.firestore {
 
     match /payments/{paymentId} {
       allow read: if isAdmin() || (isStudent() && resource.data.studentId == myStudentId());
-      allow create: if (isStudent() && request.resource.data.studentId == myStudentId()) || isAdmin();
-      allow update, delete: if isAdmin();
+      allow create: if isAdmin() || (
+        isStudent()
+        && request.resource.data.studentId == myStudentId()
+        && request.resource.data.status == "pending_verification"
+      );
+      allow update: if isAdmin() || studentCanUpdateOwnPaymentSlip();
+      allow delete: if isAdmin();
     }
 
     match /rescheduleRequests/{id} {

@@ -32,9 +32,12 @@ export function exportStudentMonthlyPdf(args: {
   });
 
   const y = (doc as any).lastAutoTable?.finalY ? Number((doc as any).lastAutoTable.finalY) + 10 : 60;
-  doc.text(`Total Earned: ${money(args.summary.totalEarnedCents)}`, 14, y);
-  doc.text(`Total Paid: ${money(args.summary.totalPaidCents)}`, 14, y + 6);
-  doc.text(`Balance: ${money(args.summary.balanceCents)}`, 14, y + 12);
+  doc.text(`Opening Balance: ${money(args.summary.openingBalanceCents)}`, 14, y);
+  doc.text(`Total Earned: ${money(args.summary.totalEarnedCents)}`, 14, y + 6);
+  doc.text(`Total Paid: ${money(args.summary.totalPaidCents)}`, 14, y + 12);
+  doc.text(`Closing Balance: ${money(args.summary.closingBalanceCents)}`, 14, y + 18);
+  doc.text(`Closing Due: ${money(args.summary.dueCents)}`, 14, y + 24);
+  doc.text(`Closing Credit: ${money(args.summary.creditCents)}`, 14, y + 30);
 
   const safeName = args.studentName.replace(/[^\w.-]+/g, "_");
   doc.save(`${safeName}_${args.month}_report.pdf`);

@@ -84,7 +84,6 @@ export function qPendingPayments(): Query<Payment> {
   return query(
     collection(db, col.payments()),
     where("status", "==", "pending_verification"),
-    orderBy("paidAt", "desc"),
     limit(200),
   ) as Query<Payment>;
 }

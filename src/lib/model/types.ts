@@ -107,6 +107,10 @@ export type MonthlySummary = {
   noShowCount: number;
   totalEarnedCents: number;
   totalPaidCents: number;
+  openingBalanceCents: number;
+  closingBalanceCents: number;
+  dueCents: number;
+  creditCents: number;
   balanceCents: number;
 };
 

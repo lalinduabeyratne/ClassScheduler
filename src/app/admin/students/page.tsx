@@ -12,12 +12,13 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
+import { getDownloadURL, ref } from "firebase/storage";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AdminTopNav } from "@/app/admin/_components/AdminTopNav";
 import { computeChargeCents } from "@/lib/billing/fee";
 import { computeStudentBalance } from "@/lib/billing/rollup";
-import { db } from "@/lib/firebase/client";
+import { db, storage } from "@/lib/firebase/client";
 import { createAuthUserWithEmailPassword } from "@/lib/firebase/createAuthUser";
 import {
   qPaymentsBetween,
@@ -95,6 +96,24 @@ function combineDateTimeMs(d: Date, hhmm: string) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh || 0, mm || 0).getTime();
 }
 
+function extractStoragePathFromSlipUrl(slipUrl: string): string | null {
+  try {
+    const parsed = new URL(slipUrl);
+    const byNameQuery = parsed.searchParams.get("name");
+    if (byNameQuery) return decodeURIComponent(byNameQuery);
+
+    const marker = "/o/";
+    const markerIndex = parsed.pathname.indexOf(marker);
+    if (markerIndex >= 0) {
+      const encodedPath = parsed.pathname.slice(markerIndex + marker.length);
+      if (encodedPath) return decodeURIComponent(encodedPath);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export default function AdminStudentsPage() {
   const router = useRouter();
   const { user, loading } = useAuthUser();
@@ -122,6 +141,7 @@ export default function AdminStudentsPage() {
   const [editSessionDuration, setEditSessionDuration] = useState("");
   const [editAssignedSlotIds, setEditAssignedSlotIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [openingSlipPaymentId, setOpeningSlipPaymentId] = useState<string | null>(null);
 
   useEffect(() => {
     if (loading) return;
@@ -539,6 +559,60 @@ export default function AdminStudentsPage() {
     }
   }
 
+  async function openPaymentSlip(payment: Payment) {
+    setActionError(null);
+    setActionSuccess(null);
+    setOpeningSlipPaymentId(payment.id);
+    try {
+      if (payment.slipPath) {
+        try {
+          const resolvedUrl = await getDownloadURL(ref(storage, payment.slipPath));
+          await updateDoc(doc(db, col.payments(), payment.id), {
+            slipUrl: resolvedUrl,
+          });
+          window.open(resolvedUrl, "_blank", "noopener,noreferrer");
+          return;
+        } catch {
+          // Fall back to slipUrl/legacy parsing below when Storage is unavailable.
+        }
+      }
+      if (!payment.slipUrl) {
+        setActionError("No slip file is attached to this payment.");
+        return;
+      }
+
+      const legacyPath = extractStoragePathFromSlipUrl(payment.slipUrl);
+      if (legacyPath) {
+        const resolvedUrl = await getDownloadURL(ref(storage, legacyPath));
+        await updateDoc(doc(db, col.payments(), payment.id), {
+          slipPath: legacyPath,
+          slipUrl: resolvedUrl,
+        });
+        window.open(resolvedUrl, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      window.open(payment.slipUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to open slip.");
+    } finally {
+      setOpeningSlipPaymentId((current) => (current === payment.id ? null : current));
+    }
+  }
+
+  async function onDeletePayment(payment: Payment) {
+    setActionError(null);
+    setActionSuccess(null);
+    const proceed = window.confirm("Delete this payment record? This cannot be undone.");
+    if (!proceed) return;
+    try {
+      await deleteDoc(doc(db, col.payments(), payment.id));
+      setActionSuccess("Payment record deleted.");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to delete payment.");
+    }
+  }
+
   if (loading || checkingRole) {
     return <div className="text-sm text-[rgb(var(--muted))]">Loading...</div>;
   }
@@ -758,7 +832,9 @@ export default function AdminStudentsPage() {
                       <th className="py-2 pr-3">Coverage</th>
                       <th className="py-2 pr-3">Method</th>
                       <th className="py-2 pr-3">Status</th>
+                      <th className="py-2 pr-3">Slip</th>
                       <th className="py-2 pr-3 text-right">Amount</th>
+                      <th className="py-2 pr-3 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -773,12 +849,26 @@ export default function AdminStudentsPage() {
                           <td className="py-2 pr-3">{p.coverageNote ?? "-"}</td>
                           <td className="py-2 pr-3">{p.method ?? "online"}</td>
                           <td className="py-2 pr-3">{p.status.replaceAll("_", " ")}</td>
+                          <td className="py-2 pr-3">
+                            {p.slipUrl || p.slipPath ? (
+                              <button className="btn btn-ghost" onClick={() => void openPaymentSlip(p)} disabled={openingSlipPaymentId === p.id}>
+                                {openingSlipPaymentId === p.id ? "Opening..." : "Open slip"}
+                              </button>
+                            ) : (
+                              <span className="text-[rgb(var(--muted))]">-</span>
+                            )}
+                          </td>
                           <td className="py-2 pr-3 text-right">{formatMoneyLKR(p.amountCents)}</td>
+                          <td className="py-2 pr-3 text-right">
+                            <button className="btn btn-ghost" onClick={() => void onDeletePayment(p)}>
+                              Delete
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     {selectedPayments.length === 0 ? (
                       <tr>
-                        <td className="py-4 text-[rgb(var(--muted))]" colSpan={6}>
+                        <td className="py-4 text-[rgb(var(--muted))]" colSpan={8}>
                           No payment records.
                         </td>
                       </tr>

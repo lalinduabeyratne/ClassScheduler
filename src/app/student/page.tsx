@@ -1,9 +1,10 @@
 "use client";
 
 import { collection, limit, query, where } from "firebase/firestore";
+import { getDownloadURL, ref } from "firebase/storage";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { db } from "@/lib/firebase/client";
+import { db, storage } from "@/lib/firebase/client";
 import { useAuthUser } from "@/lib/firebase/useAuthUser";
 import { getUserRole } from "@/lib/roles/getUserRole";
 import {
@@ -16,7 +17,7 @@ import { useFirestoreQuery } from "@/lib/firestore/hooks";
 import { col } from "@/lib/firestore/paths";
 import { computeStudentBalance } from "@/lib/billing/rollup";
 import type { Payment, Session, Student } from "@/lib/model/types";
-import { createPaymentWithSlip } from "@/lib/payments/createPaymentWithSlip";
+import { createPaymentWithSlip, replacePaymentSlip } from "@/lib/payments/createPaymentWithSlip";
 import { createRescheduleRequest } from "@/lib/reschedule/createRequest";
 import { StudentTopNav } from "@/app/student/_components/StudentTopNav";
 
@@ -36,6 +37,97 @@ function formatDateTimeCompact(ms: number) {
   }).format(new Date(ms));
 }
 
+function extractStoragePathFromSlipUrl(slipUrl: string): string | null {
+  try {
+    const parsed = new URL(slipUrl);
+    const byNameQuery = parsed.searchParams.get("name");
+    if (byNameQuery) return decodeURIComponent(byNameQuery);
+
+    const marker = "/o/";
+    const markerIndex = parsed.pathname.indexOf(marker);
+    if (markerIndex >= 0) {
+      const encodedPath = parsed.pathname.slice(markerIndex + marker.length);
+      if (encodedPath) return decodeURIComponent(encodedPath);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+const MAX_SLIP_BYTES = 20 * 1024 * 1024;
+const MAX_IMAGE_DIMENSION_PX = 1800;
+const IMAGE_QUALITY = 0.82;
+
+function ensureSupportedSlipType(file: File) {
+  const name = file.name.toLowerCase();
+  const byMimeImage = file.type.startsWith("image/");
+  const byMimePdf = file.type === "application/pdf";
+  const byExtImage = /\.(jpg|jpeg|png|webp|heic|heif)$/i.test(name);
+  const byExtPdf = /\.pdf$/i.test(name);
+  const isImage = byMimeImage || byExtImage;
+  const isPdf = byMimePdf || byExtPdf;
+  if (!isImage && !isPdf) {
+    throw new Error("Unsupported file type. Please upload an image or PDF.");
+  }
+}
+
+function getScaledSize(width: number, height: number) {
+  const maxSide = Math.max(width, height);
+  if (maxSide <= MAX_IMAGE_DIMENSION_PX) {
+    return { width, height };
+  }
+  const scale = MAX_IMAGE_DIMENSION_PX / maxSide;
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+async function compressImageFile(file: File): Promise<File> {
+  const canAttemptImageCompression = file.type.startsWith("image/") || /\.(jpg|jpeg|png|webp)$/i.test(file.name);
+  if (!canAttemptImageCompression) return file;
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const node = new Image();
+      node.onload = () => resolve(node);
+      node.onerror = () => reject(new Error("Image decode failed"));
+      node.src = objectUrl;
+    }).catch(() => null);
+
+    if (!img) return file;
+
+    const scaled = getScaledSize(img.naturalWidth || img.width, img.naturalHeight || img.height);
+    const canvas = document.createElement("canvas");
+    canvas.width = scaled.width;
+    canvas.height = scaled.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+
+    ctx.drawImage(img, 0, 0, scaled.width, scaled.height);
+    const compressedBlob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", IMAGE_QUALITY);
+    });
+
+    if (!compressedBlob || compressedBlob.size >= file.size) return file;
+    const jpegName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+    return new File([compressedBlob], jpegName, { type: "image/jpeg" });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function prepareSlipForUpload(file: File): Promise<File> {
+  ensureSupportedSlipType(file);
+  const optimized = await compressImageFile(file);
+  if (optimized.size > MAX_SLIP_BYTES) {
+    throw new Error("File is too large. Keep it under 20MB.");
+  }
+  return optimized;
+}
+
 export default function StudentPage() {
   const router = useRouter();
   const { user, loading } = useAuthUser();
@@ -46,8 +138,16 @@ export default function StudentPage() {
   const [payAmountLkr, setPayAmountLkr] = useState("");
   const [payFile, setPayFile] = useState<File | null>(null);
   const [paySubmitting, setPaySubmitting] = useState(false);
+  const [payUploadPercent, setPayUploadPercent] = useState(0);
   const [payError, setPayError] = useState<string | null>(null);
   const [paySuccess, setPaySuccess] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historySuccess, setHistorySuccess] = useState<string | null>(null);
+  const [openingSlipPaymentId, setOpeningSlipPaymentId] = useState<string | null>(null);
+  const [reuploadPaymentId, setReuploadPaymentId] = useState<string | null>(null);
+  const [reuploadFile, setReuploadFile] = useState<File | null>(null);
+  const [reuploadSubmitting, setReuploadSubmitting] = useState(false);
+  const [reuploadPercent, setReuploadPercent] = useState(0);
   const [rescheduleSessionId, setRescheduleSessionId] = useState("");
   const [rescheduleNewStart, setRescheduleNewStart] = useState("");
   const [rescheduleReason, setRescheduleReason] = useState("");
@@ -153,6 +253,14 @@ export default function StudentPage() {
     [payments, sessions],
   );
   const duePaymentCents = Math.max(0, balance.remainingCents);
+  const pendingPaymentCents = useMemo(
+    () =>
+      payments
+        .filter((payment) => payment.status === "pending_verification")
+        .reduce((sum, payment) => sum + (payment.amountCents ?? 0), 0),
+    [payments],
+  );
+  const projectedDueAfterPendingCents = Math.max(0, duePaymentCents - pendingPaymentCents);
 
   const upcomingSessions = useMemo(() => {
     const nowMs = Date.now();
@@ -167,11 +275,34 @@ export default function StudentPage() {
   }, [payments]);
 
   const unpaidSessions = useMemo(() => {
-    return [...sessions]
+    const chargedSessions = [...sessions]
       .filter((session) => Number(session.chargeCents ?? 0) > 0)
+      .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0));
+
+    let paidCentsRemaining = payments
+      .filter((payment) => payment.status === "verified")
+      .reduce((sum, payment) => sum + (payment.amountCents ?? 0), 0);
+
+    const outstanding: Array<Session & { unpaidCents: number }> = [];
+
+    for (const session of chargedSessions) {
+      const chargeCents = Math.max(0, Number(session.chargeCents ?? 0));
+      if (chargeCents <= 0) continue;
+
+      if (paidCentsRemaining >= chargeCents) {
+        paidCentsRemaining -= chargeCents;
+        continue;
+      }
+
+      const unpaidCents = chargeCents - Math.max(0, paidCentsRemaining);
+      paidCentsRemaining = 0;
+      outstanding.push({ ...session, unpaidCents });
+    }
+
+    return outstanding
       .sort((a, b) => (b.startAt ?? 0) - (a.startAt ?? 0))
       .slice(0, 12);
-  }, [sessions]);
+  }, [payments, sessions]);
 
   const sortedReschedules = useMemo(() => {
     return [...reschedules].sort(
@@ -192,6 +323,74 @@ export default function StudentPage() {
     () => upcomingSessions.find((s) => s.id === rescheduleSessionId) ?? null,
     [rescheduleSessionId, upcomingSessions],
   );
+
+  async function openPaymentSlip(payment: Payment) {
+    setHistoryError(null);
+    setHistorySuccess(null);
+    setOpeningSlipPaymentId(payment.id);
+    try {
+      if (payment.slipPath) {
+        try {
+          const resolvedUrl = await getDownloadURL(ref(storage, payment.slipPath));
+          window.open(resolvedUrl, "_blank", "noopener,noreferrer");
+          return;
+        } catch {
+          // Fall back to slipUrl/legacy parsing below when Storage is unavailable.
+        }
+      }
+      if (!payment.slipUrl) {
+        setHistoryError("No slip is attached for this payment.");
+        return;
+      }
+
+      const legacyPath = extractStoragePathFromSlipUrl(payment.slipUrl);
+      if (legacyPath) {
+        const resolvedUrl = await getDownloadURL(ref(storage, legacyPath));
+        window.open(resolvedUrl, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      window.open(payment.slipUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : "Failed to open slip.");
+    } finally {
+      setOpeningSlipPaymentId((current) => (current === payment.id ? null : current));
+    }
+  }
+
+  async function submitSlipReupload() {
+    setHistoryError(null);
+    setHistorySuccess(null);
+    if (!studentId || !reuploadPaymentId) {
+      setHistoryError("Select a payment to re-upload the slip.");
+      return;
+    }
+    if (!reuploadFile) {
+      setHistoryError("Please choose an image/PDF slip file first.");
+      return;
+    }
+
+    setReuploadSubmitting(true);
+    setReuploadPercent(0);
+    try {
+      const optimizedFile = await prepareSlipForUpload(reuploadFile);
+      await replacePaymentSlip({
+        paymentId: reuploadPaymentId,
+        studentId,
+        file: optimizedFile,
+        onProgress: (percent) => setReuploadPercent(percent),
+      });
+      setReuploadFile(null);
+      setReuploadPaymentId(null);
+      setReuploadPercent(100);
+      setHistorySuccess("Slip re-uploaded successfully. Status is now pending verification.");
+    } catch (err) {
+      setReuploadPercent(0);
+      setHistoryError(err instanceof Error ? err.message : "Failed to re-upload slip.");
+    } finally {
+      setReuploadSubmitting(false);
+    }
+  }
   const requestedStartAtMs = rescheduleNewStart ? new Date(rescheduleNewStart).getTime() : NaN;
   const rescheduleTimeError =
     !rescheduleNewStart
@@ -235,6 +434,16 @@ export default function StudentPage() {
                 ? "This is the amount still due based on verified payments and attendance charges."
                 : "No payment is due right now."}
             </div>
+            <div className="mt-3 grid gap-2 text-sm md:grid-cols-2">
+              <div className="rounded-lg border border-[rgb(var(--border))] bg-black/5 px-3 py-2 dark:bg-white/5">
+                <div className="text-xs text-[rgb(var(--muted))]">Pending verification</div>
+                <div className="font-semibold">{formatMoneyLKR(pendingPaymentCents)}</div>
+              </div>
+              <div className="rounded-lg border border-[rgb(var(--border))] bg-black/5 px-3 py-2 dark:bg-white/5">
+                <div className="text-xs text-[rgb(var(--muted))]">Projected due after pending</div>
+                <div className="font-semibold">{formatMoneyLKR(projectedDueAfterPendingCents)}</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -272,7 +481,7 @@ export default function StudentPage() {
       <div className="card p-6">
         <div className="font-semibold">Unpaid sessions</div>
         <div className="mt-1 text-xs text-[rgb(var(--muted))]">
-          Sessions with a charge amount. Payments are tracked against your total balance.
+          Oldest session charges are covered first using verified payments.
         </div>
         {!studentId ? (
           <div className="mt-2 text-sm text-[rgb(var(--muted))]">
@@ -287,7 +496,7 @@ export default function StudentPage() {
                 <tr className="border-b border-[rgb(var(--border))]">
                   <th className="py-2 pr-3">Date</th>
                   <th className="py-2 pr-3">Status</th>
-                  <th className="py-2 pr-3 text-right">Charge</th>
+                  <th className="py-2 pr-3 text-right">Unpaid amount</th>
                 </tr>
               </thead>
               <tbody>
@@ -295,7 +504,7 @@ export default function StudentPage() {
                   <tr key={s.id} className="border-b border-[rgb(var(--border))]">
                     <td className="py-2 pr-3">{formatDateTimeCompact(s.startAt)}</td>
                     <td className="py-2 pr-3">{s.status.replaceAll("_", " ")}</td>
-                    <td className="py-2 pr-3 text-right">{formatMoneyLKR(s.chargeCents)}</td>
+                    <td className="py-2 pr-3 text-right">{formatMoneyLKR(s.unpaidCents)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -366,16 +575,21 @@ export default function StudentPage() {
                 return;
               }
               setPaySubmitting(true);
+              setPayUploadPercent(0);
               try {
+                const optimizedFile = await prepareSlipForUpload(payFile);
                 await createPaymentWithSlip({
                   studentId,
                   amountCents: payAmountCents,
-                  file: payFile,
+                  file: optimizedFile,
+                  onProgress: (percent) => setPayUploadPercent(percent),
                 });
                 setPayAmountLkr("");
                 setPayFile(null);
+                setPayUploadPercent(100);
                 setPaySuccess("Payment submitted successfully. It will stay pending until verified.");
               } catch (err) {
+                setPayUploadPercent(0);
                 setPayError(err instanceof Error ? err.message : "Upload failed");
               } finally {
                 setPaySubmitting(false);
@@ -383,28 +597,33 @@ export default function StudentPage() {
             }}
           >
             <div className="space-y-1">
-              <div className="label">Amount (LKR)</div>
+              <div className="label">Amount (LKR) *</div>
               <input
                 className="input"
                 value={payAmountLkr}
                 onChange={(e) => setPayAmountLkr(e.target.value)}
                 placeholder="2500"
                 inputMode="decimal"
+                required
+                aria-required="true"
+                aria-invalid={Boolean(payAmountError)}
               />
               <div className={`text-xs ${payAmountError ? "text-rose-300" : "text-[rgb(var(--muted))]"}`}>
                 {payAmountError ? payAmountError : `You are about to submit ${formatMoneyLKR(payAmountCents)}.`}
               </div>
             </div>
             <div className="space-y-1 md:col-span-2">
-              <div className="label">Slip (image or PDF)</div>
+              <div className="label">Slip (image or PDF) *</div>
               <input
                 className="input"
                 type="file"
                 accept="image/*,application/pdf"
+                required
+                aria-required="true"
                 onChange={(e) => setPayFile(e.target.files?.[0] ?? null)}
               />
               <div className="text-xs text-[rgb(var(--muted))]">
-                {payFile ? `Selected file: ${payFile.name}` : "Choose an image or PDF receipt."}
+                {payFile ? `Selected file: ${payFile.name}` : "Choose an image or PDF receipt (max 20MB)."}
               </div>
             </div>
 
@@ -420,9 +639,24 @@ export default function StudentPage() {
               </div>
             ) : null}
 
+            {paySubmitting ? (
+              <div className="md:col-span-3 space-y-2" aria-live="polite">
+                <div className="flex items-center justify-between text-xs text-[rgb(var(--muted))]">
+                  <span>Uploading slip</span>
+                  <span>{payUploadPercent}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-[rgb(var(--border))]">
+                  <div
+                    className="h-full bg-emerald-500 transition-all duration-200"
+                    style={{ width: `${payUploadPercent}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
+
             <div className="md:col-span-3 flex items-center justify-end">
               <button className="btn btn-primary" disabled={!canSubmitPayment}>
-                {paySubmitting ? "Uploading..." : "Submit payment"}
+                {paySubmitting ? `Uploading ${payUploadPercent}%` : "Submit payment"}
               </button>
             </div>
           </form>
@@ -437,6 +671,56 @@ export default function StudentPage() {
           </div>
         ) : (
           <div className="mt-3">
+            {historyError ? (
+              <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200" aria-live="polite">
+                {historyError}
+              </div>
+            ) : null}
+            {historySuccess ? (
+              <div className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200" aria-live="polite">
+                {historySuccess}
+              </div>
+            ) : null}
+
+            {reuploadPaymentId ? (
+              <div className="mb-3 space-y-3 rounded-lg border border-[rgb(var(--border))] p-3">
+                <div className="text-sm font-medium">Re-upload slip</div>
+                <div className="text-xs text-[rgb(var(--muted))]">Selected payment ID: {reuploadPaymentId}</div>
+                <input
+                  className="input"
+                  type="file"
+                  accept="image/*,application/pdf"
+                  onChange={(e) => setReuploadFile(e.target.files?.[0] ?? null)}
+                />
+                {reuploadSubmitting ? (
+                  <div className="space-y-2" aria-live="polite">
+                    <div className="flex items-center justify-between text-xs text-[rgb(var(--muted))]">
+                      <span>Uploading replacement slip</span>
+                      <span>{reuploadPercent}%</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-[rgb(var(--border))]">
+                      <div
+                        className="h-full bg-emerald-500 transition-all duration-200"
+                        style={{ width: `${reuploadPercent}%` }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button className="btn btn-ghost" onClick={() => {
+                    setReuploadPaymentId(null);
+                    setReuploadFile(null);
+                    setReuploadPercent(0);
+                  }} disabled={reuploadSubmitting}>
+                    Cancel
+                  </button>
+                  <button className="btn btn-primary" onClick={() => void submitSlipReupload()} disabled={reuploadSubmitting || !reuploadFile}>
+                    {reuploadSubmitting ? `Uploading ${reuploadPercent}%` : "Upload replacement slip"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             {paymentHistory.length === 0 ? (
               <div className="rounded-lg border border-dashed border-[rgb(var(--border))] p-4 text-sm text-[rgb(var(--muted))]">
                 No payment records yet.
@@ -455,6 +739,32 @@ export default function StudentPage() {
                     <div>Method: {p.method ?? "online"}</div>
                     <div className="col-span-2">Coverage: {p.coverageNote ?? "-"}</div>
                     <div className="col-span-2">Status: {p.status.replaceAll("_", " ")}</div>
+                    <div className="col-span-2">
+                      Slip:{" "}
+                      {p.slipUrl || p.slipPath ? (
+                        <button className="btn btn-ghost" onClick={() => void openPaymentSlip(p)} disabled={openingSlipPaymentId === p.id}>
+                          {openingSlipPaymentId === p.id ? "Opening..." : "Open slip"}
+                        </button>
+                      ) : (
+                        "-"
+                      )}
+                    </div>
+                    {p.status !== "verified" ? (
+                      <div className="col-span-2">
+                        <button
+                          className="btn btn-ghost"
+                          onClick={() => {
+                            setReuploadPaymentId(p.id);
+                            setReuploadFile(null);
+                            setReuploadPercent(0);
+                            setHistoryError(null);
+                            setHistorySuccess(null);
+                          }}
+                        >
+                          Re-upload slip
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               ))}
@@ -469,7 +779,9 @@ export default function StudentPage() {
                     <th className="py-2 pr-3">Coverage</th>
                     <th className="py-2 pr-3">Method</th>
                     <th className="py-2 pr-3">Status</th>
+                    <th className="py-2 pr-3">Slip</th>
                     <th className="py-2 pr-3 text-right">Amount</th>
+                    <th className="py-2 pr-3 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -480,7 +792,34 @@ export default function StudentPage() {
                       <td className="py-2 pr-3">{p.coverageNote ?? "-"}</td>
                       <td className="py-2 pr-3">{p.method ?? "online"}</td>
                       <td className="py-2 pr-3">{p.status.replaceAll("_", " ")}</td>
+                      <td className="py-2 pr-3">
+                        {p.slipUrl || p.slipPath ? (
+                          <button className="btn btn-ghost" onClick={() => void openPaymentSlip(p)} disabled={openingSlipPaymentId === p.id}>
+                            {openingSlipPaymentId === p.id ? "Opening..." : "Open slip"}
+                          </button>
+                        ) : (
+                          <span className="text-[rgb(var(--muted))]">-</span>
+                        )}
+                      </td>
                       <td className="py-2 pr-3 text-right">{formatMoneyLKR(p.amountCents)}</td>
+                      <td className="py-2 pr-3 text-right">
+                        {p.status !== "verified" ? (
+                          <button
+                            className="btn btn-ghost"
+                            onClick={() => {
+                              setReuploadPaymentId(p.id);
+                              setReuploadFile(null);
+                              setReuploadPercent(0);
+                              setHistoryError(null);
+                              setHistorySuccess(null);
+                            }}
+                          >
+                            Re-upload slip
+                          </button>
+                        ) : (
+                          <span className="text-[rgb(var(--muted))]">-</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

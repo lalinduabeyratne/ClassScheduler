@@ -1,14 +1,15 @@
 "use client";
 
-import { addDoc, collection, doc, updateDoc } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, updateDoc } from "firebase/firestore";
 import { FirebaseError } from "firebase/app";
+import { getDownloadURL, ref } from "firebase/storage";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AdminTopNav } from "@/app/admin/_components/AdminTopNav";
 import { computeMonthlySummary, getMonthlyReportRows, monthKeyFromMs } from "@/lib/billing/monthly";
 import { computeChargeCents } from "@/lib/billing/fee";
 import { exportStudentMonthlyPdf } from "@/lib/billing/exportPdf";
-import { db } from "@/lib/firebase/client";
+import { db, storage } from "@/lib/firebase/client";
 import { useAuthUser } from "@/lib/firebase/useAuthUser";
 import {
   qPendingPayments,
@@ -42,6 +43,24 @@ function formatMoneyLKR(cents: number) {
   }).format(amount);
 }
 
+function extractStoragePathFromSlipUrl(slipUrl: string): string | null {
+  try {
+    const parsed = new URL(slipUrl);
+    const byNameQuery = parsed.searchParams.get("name");
+    if (byNameQuery) return decodeURIComponent(byNameQuery);
+
+    const marker = "/o/";
+    const markerIndex = parsed.pathname.indexOf(marker);
+    if (markerIndex >= 0) {
+      const encodedPath = parsed.pathname.slice(markerIndex + marker.length);
+      if (encodedPath) return decodeURIComponent(encodedPath);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function statusButtonClass(active: boolean, kind: "attended" | "early_cancel" | "late_cancel" | "no_show") {
   if (kind === "attended") {
     return active
@@ -67,6 +86,7 @@ export default function AdminPage() {
   const [checkingRole, setCheckingRole] = useState(true);
   const [accessError, setAccessError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [slipActionError, setSlipActionError] = useState<string | null>(null);
 
   const now = new Date();
   const todayStart = startOfDayMs(now);
@@ -87,6 +107,7 @@ export default function AdminPage() {
   const [paymentCoverageNote, setPaymentCoverageNote] = useState("");
   const [paymentNotes, setPaymentNotes] = useState("");
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  const [openingSlipPaymentId, setOpeningSlipPaymentId] = useState<string | null>(null);
 
   useEffect(() => {
     if (loading) return;
@@ -148,7 +169,11 @@ export default function AdminPage() {
   const { data: monthSessions } = useFirestoreQuery<Session>(monthSessionsQuery);
   const { data: allSessions } = useFirestoreQuery<Session>(allSessionsQuery);
   const { data: allPayments } = useFirestoreQuery<Payment>(allPaymentsQuery);
-  const { data: pendingPayments, loading: pendingLoading } = useFirestoreQuery<Payment>(pendingPaymentsQuery);
+  const {
+    data: pendingPayments,
+    loading: pendingLoading,
+    error: pendingPaymentsError,
+  } = useFirestoreQuery<Payment>(pendingPaymentsQuery);
   const {
     data: pendingReschedules,
     error: pendingReschedulesError,
@@ -179,6 +204,10 @@ export default function AdminPage() {
     );
   }, [pendingReschedules]);
 
+  const sortedPendingPayments = useMemo(() => {
+    return [...pendingPayments].sort((a, b) => (b.paidAt ?? 0) - (a.paidAt ?? 0));
+  }, [pendingPayments]);
+
   const monthEarningsCents = useMemo(
     () => monthSessions.reduce((sum, s) => sum + (s.chargeCents ?? 0), 0),
     [monthSessions],
@@ -189,10 +218,13 @@ export default function AdminPage() {
     const totalPaidCents = allPayments
       .filter((p) => p.status === "verified")
       .reduce((sum, p) => sum + (p.amountCents ?? 0), 0);
+    const balanceCents = totalEarnedCents - totalPaidCents;
     return {
       totalEarnedCents,
       totalPaidCents,
-      balanceCents: totalEarnedCents - totalPaidCents,
+      balanceCents,
+      dueCents: Math.max(0, balanceCents),
+      creditCents: Math.max(0, -balanceCents),
     };
   }, [allPayments, allSessions]);
 
@@ -204,18 +236,21 @@ export default function AdminPage() {
       const paid = allPayments
         .filter((p) => p.studentId === student.id && p.status === "verified")
         .reduce((sum, p) => sum + (p.amountCents ?? 0), 0);
+      const balanceCents = earned - paid;
       return {
         studentId: student.id,
         studentName: student.fullName,
         earnedCents: earned,
         paidCents: paid,
-        balanceCents: earned - paid,
+        balanceCents,
+        dueCents: Math.max(0, balanceCents),
+        creditCents: Math.max(0, -balanceCents),
       };
-    }).sort((a, b) => b.balanceCents - a.balanceCents);
+    }).sort((a, b) => b.dueCents - a.dueCents);
   }, [allPayments, allSessions, students]);
 
   const outstandingStudents = useMemo(
-    () => studentSummaries.filter((s) => s.balanceCents > 0),
+    () => studentSummaries.filter((s) => s.dueCents > 0),
     [studentSummaries],
   );
 
@@ -333,6 +368,57 @@ export default function AdminPage() {
     }
   }
 
+  async function openSlip(payment: Payment) {
+    setSlipActionError(null);
+    setOpeningSlipPaymentId(payment.id);
+    try {
+      if (payment.slipPath) {
+        try {
+          const resolvedUrl = await getDownloadURL(ref(storage, payment.slipPath));
+          await updateDoc(doc(db, col.payments(), payment.id), {
+            slipUrl: resolvedUrl,
+          });
+          window.open(resolvedUrl, "_blank", "noopener,noreferrer");
+          return;
+        } catch {
+          // Fall back to slipUrl/legacy parsing below when Storage is unavailable.
+        }
+      }
+      if (!payment.slipUrl) {
+        setSlipActionError("No slip file is attached to this payment.");
+        return;
+      }
+
+      const legacyPath = extractStoragePathFromSlipUrl(payment.slipUrl);
+      if (legacyPath) {
+        const resolvedUrl = await getDownloadURL(ref(storage, legacyPath));
+        await updateDoc(doc(db, col.payments(), payment.id), {
+          slipPath: legacyPath,
+          slipUrl: resolvedUrl,
+        });
+        window.open(resolvedUrl, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      window.open(payment.slipUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setSlipActionError(err instanceof Error ? err.message : "Failed to open slip.");
+    } finally {
+      setOpeningSlipPaymentId((current) => (current === payment.id ? null : current));
+    }
+  }
+
+  async function deletePayment(payment: Payment) {
+    setSlipActionError(null);
+    const proceed = window.confirm("Delete this payment record? This cannot be undone.");
+    if (!proceed) return;
+    try {
+      await deleteDoc(doc(db, col.payments(), payment.id));
+    } catch (err) {
+      setSlipActionError(err instanceof Error ? err.message : "Failed to delete payment.");
+    }
+  }
+
   function exportPdf() {
     if (!selectedStudentForReport) {
       setActionError("Select a student before exporting a PDF report.");
@@ -389,10 +475,13 @@ export default function AdminPage() {
         </div>
         <div className="card p-6">
           <div className="font-semibold">Outstanding balance</div>
-          <div className={`mt-2 text-sm font-semibold ${totalsToDate.balanceCents > 0 ? "text-rose-500" : "text-emerald-500"}`}>
-            {formatMoneyLKR(totalsToDate.balanceCents)}
+          <div className={`mt-2 text-sm font-semibold ${totalsToDate.dueCents > 0 ? "text-rose-500" : "text-emerald-500"}`}>
+            {formatMoneyLKR(totalsToDate.dueCents)}
             <span className="ml-2 text-xs text-[rgb(var(--muted))]">({lateCancelsToday} late cancels today)</span>
           </div>
+          {totalsToDate.creditCents > 0 ? (
+            <div className="mt-1 text-xs text-emerald-500">Advance credit: {formatMoneyLKR(totalsToDate.creditCents)}</div>
+          ) : null}
           <div className="mt-2 text-xs text-[rgb(var(--muted))]">
             Live total from all sessions minus verified payments.
           </div>
@@ -406,28 +495,29 @@ export default function AdminPage() {
             {outstandingStudents.length} student{outstandingStudents.length === 1 ? "" : "s"} owe money right now
           </div>
         </div>
+        <div className="mt-1 text-xs text-[rgb(var(--muted))]">
+          Shows only currently unpaid amounts after verified payments are deducted.
+        </div>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-[rgb(var(--muted))]">
               <tr className="border-b border-[rgb(var(--border))]">
                 <th className="py-2 pr-3">Student</th>
                 <th className="py-2 pr-3 text-right">Earned</th>
-                <th className="py-2 pr-3 text-right">Paid</th>
-                <th className="py-2 pr-3 text-right">Balance</th>
+                <th className="py-2 pr-3 text-right">Due</th>
               </tr>
             </thead>
             <tbody>
-              {outstandingStudents.slice(0, 10).map((row) => (
+              {outstandingStudents.map((row) => (
                 <tr key={row.studentId} className="border-b border-[rgb(var(--border))]">
                   <td className="py-2 pr-3">{row.studentName}</td>
                   <td className="py-2 pr-3 text-right">{formatMoneyLKR(row.earnedCents)}</td>
-                  <td className="py-2 pr-3 text-right">{formatMoneyLKR(row.paidCents)}</td>
-                  <td className="py-2 pr-3 text-right font-semibold text-rose-500">{formatMoneyLKR(row.balanceCents)}</td>
+                  <td className="py-2 pr-3 text-right font-semibold text-rose-500">{formatMoneyLKR(row.dueCents)}</td>
                 </tr>
               ))}
               {outstandingStudents.length === 0 ? (
                 <tr>
-                  <td className="py-4 text-[rgb(var(--muted))]" colSpan={4}>
+                  <td className="py-4 text-[rgb(var(--muted))]" colSpan={3}>
                     No outstanding balances right now.
                   </td>
                 </tr>
@@ -564,8 +654,8 @@ export default function AdminPage() {
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-6">
           <div className="space-y-1">
-            <div className="label">Student</div>
-            <select className="input" value={paymentStudentId} onChange={(e) => setPaymentStudentId(e.target.value)}>
+            <div className="label">Student *</div>
+            <select className="input" value={paymentStudentId} onChange={(e) => setPaymentStudentId(e.target.value)} required aria-required="true">
               <option value="">Select student</option>
               {students.filter((s) => s.active).map((s) => (
                 <option key={s.id} value={s.id}>
@@ -575,12 +665,12 @@ export default function AdminPage() {
             </select>
           </div>
           <div className="space-y-1">
-            <div className="label">Amount (LKR)</div>
-            <input className="input" value={paymentAmountLkr} onChange={(e) => setPaymentAmountLkr(e.target.value)} inputMode="decimal" />
+            <div className="label">Amount (LKR) *</div>
+            <input className="input" value={paymentAmountLkr} onChange={(e) => setPaymentAmountLkr(e.target.value)} inputMode="decimal" required aria-required="true" />
           </div>
           <div className="space-y-1">
-            <div className="label">Date</div>
-            <input className="input" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
+            <div className="label">Date *</div>
+            <input className="input" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} required aria-required="true" />
           </div>
           <div className="space-y-1">
             <div className="label">Method</div>
@@ -610,7 +700,7 @@ export default function AdminPage() {
         </div>
         <div className="mt-3 flex items-center justify-end gap-2">
           <button className="btn btn-primary" disabled={paymentSubmitting} onClick={() => void addAdminPayment()}>
-            Save payment
+            {paymentSubmitting ? "Saving..." : "Save payment"}
           </button>
         </div>
       </div>
@@ -653,32 +743,43 @@ export default function AdminPage() {
             <input className="input" type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} />
           </div>
         </div>
+        <div className="mt-1 text-xs text-[rgb(var(--muted))]">
+          Closing due and credit include carry-forward from prior months.
+        </div>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-[rgb(var(--muted))]">
               <tr className="border-b border-[rgb(var(--border))]">
                 <th className="py-2 pr-3">Student</th>
+                <th className="py-2 pr-3 text-right">Opening</th>
                 <th className="py-2 pr-3 text-right">Sessions</th>
                 <th className="py-2 pr-3 text-right">Attended</th>
                 <th className="py-2 pr-3 text-right">Late cancel</th>
                 <th className="py-2 pr-3 text-right">No show</th>
                 <th className="py-2 pr-3 text-right">Earned</th>
                 <th className="py-2 pr-3 text-right">Paid</th>
-                <th className="py-2 pr-3 text-right">Balance</th>
+                <th className="py-2 pr-3 text-right">Closing due</th>
+                <th className="py-2 pr-3 text-right">Closing credit</th>
               </tr>
             </thead>
             <tbody>
               {monthlySummaries.map((row) => (
                 <tr key={row.studentId} className="border-b border-[rgb(var(--border))]">
                   <td className="py-2 pr-3">{studentsById.get(row.studentId)?.fullName ?? row.studentId}</td>
+                  <td className={`py-2 pr-3 text-right font-semibold ${row.openingBalanceCents > 0 ? "text-rose-500" : row.openingBalanceCents < 0 ? "text-emerald-500" : ""}`}>
+                    {formatMoneyLKR(row.openingBalanceCents)}
+                  </td>
                   <td className="py-2 pr-3 text-right">{row.totalSessions}</td>
                   <td className="py-2 pr-3 text-right">{row.attendedCount}</td>
                   <td className="py-2 pr-3 text-right">{row.lateCancelCount}</td>
                   <td className="py-2 pr-3 text-right">{row.noShowCount}</td>
                   <td className="py-2 pr-3 text-right">{formatMoneyLKR(row.totalEarnedCents)}</td>
                   <td className="py-2 pr-3 text-right">{formatMoneyLKR(row.totalPaidCents)}</td>
-                  <td className={`py-2 pr-3 text-right font-semibold ${row.balanceCents > 0 ? "text-rose-500" : "text-emerald-500"}`}>
-                    {formatMoneyLKR(row.balanceCents)}
+                  <td className="py-2 pr-3 text-right font-semibold text-rose-500">
+                    {formatMoneyLKR(row.dueCents)}
+                  </td>
+                  <td className="py-2 pr-3 text-right font-semibold text-emerald-500">
+                    {formatMoneyLKR(row.creditCents)}
                   </td>
                 </tr>
               ))}
@@ -715,6 +816,16 @@ export default function AdminPage() {
 
       <div className="card p-6">
         <div className="font-semibold">Pending payment slips</div>
+        {pendingPaymentsError ? (
+          <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200" aria-live="polite">
+            {pendingPaymentsError}
+          </div>
+        ) : null}
+        {slipActionError ? (
+          <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200" aria-live="polite">
+            {slipActionError}
+          </div>
+        ) : null}
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-[rgb(var(--muted))]">
@@ -727,7 +838,7 @@ export default function AdminPage() {
               </tr>
             </thead>
             <tbody>
-              {pendingPayments.map((p) => (
+              {sortedPendingPayments.map((p) => (
                 <tr key={p.id} className="border-b border-[rgb(var(--border))]">
                   <td className="py-2 pr-3">
                     <div className="font-medium">{studentsById.get(p.studentId)?.fullName ?? p.studentId}</div>
@@ -739,10 +850,10 @@ export default function AdminPage() {
                   </td>
                   <td className="py-2 pr-3 text-right font-semibold">{formatMoneyLKR(p.amountCents)}</td>
                   <td className="py-2 pr-3">
-                    {p.slipUrl ? (
-                      <a className="text-[rgb(var(--brand))] hover:underline" href={p.slipUrl} target="_blank" rel="noreferrer">
-                        View
-                      </a>
+                    {p.slipUrl || p.slipPath ? (
+                      <button className="btn btn-ghost" onClick={() => void openSlip(p)} disabled={openingSlipPaymentId === p.id}>
+                        {openingSlipPaymentId === p.id ? "Opening..." : "Open slip"}
+                      </button>
                     ) : (
                       <span className="text-[rgb(var(--muted))]">-</span>
                     )}
@@ -769,6 +880,9 @@ export default function AdminPage() {
                       >
                         Reject
                       </button>
+                      <button className="btn btn-ghost" onClick={() => void deletePayment(p)}>
+                        Delete
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -780,7 +894,7 @@ export default function AdminPage() {
                   </td>
                 </tr>
               ) : null}
-              {pendingPayments.length === 0 ? (
+              {sortedPendingPayments.length === 0 ? (
                 <tr>
                   <td className="py-6 text-center text-sm text-[rgb(var(--muted))]" colSpan={5}>
                     No pending payments.

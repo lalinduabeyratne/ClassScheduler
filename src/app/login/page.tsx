@@ -25,7 +25,12 @@ export default function LoginPage() {
     if (!loading && user) {
       (async () => {
         try {
-          const role = await getUserRole(user.uid);
+          let role = await getUserRole(user.uid);
+          if (!role) {
+            // Ensure the latest auth token is available before final role check.
+            await user.getIdToken(true);
+            role = await getUserRole(user.uid);
+          }
           if (!role) {
             setError(
               "Your account is signed in, but Firestore is missing users/UID role data. Check the users document for this account.",
@@ -49,15 +54,8 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      const result = await signInWithEmailAndPassword(auth, email.trim(), password);
-      const role = await getUserRole(result.user.uid);
-      if (!role) {
-        setError(
-          "Signed in, but your Firestore users document is missing role data. Create users/UID with role=admin or role=student.",
-        );
-        return;
-      }
-      router.replace(role === "admin" ? "/admin" : "/student");
+      await signInWithEmailAndPassword(auth, email.trim(), password);
+      // Navigation is handled by the auth-state effect once role lookup succeeds.
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
