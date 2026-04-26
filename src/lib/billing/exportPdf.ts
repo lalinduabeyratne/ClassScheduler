@@ -4,6 +4,11 @@ import { allocateVerifiedPaymentsOldestFirst } from "@/lib/billing/rollup";
 import { computeMonthlySummary, monthKeyFromMs } from "@/lib/billing/monthly";
 import type { MonthlySummary, Payment, Session, Student } from "@/lib/model/types";
 
+type MonthlyReportStudent = Pick<
+  Student,
+  "id" | "fullName" | "email" | "parentName" | "contactNumber" | "sessionDurationMin" | "feePerSessionCents"
+>;
+
 function money(cents: number) {
   return new Intl.NumberFormat("en-LK", {
     style: "currency",
@@ -82,7 +87,7 @@ export function exportStudentMonthlyPdf(args: {
 }
 
 export function exportStudentComprehensiveReport(args: {
-  student: Student;
+  student: MonthlyReportStudent;
   month: string;
   sessions: Session[];
   payments: Payment[];
@@ -143,10 +148,10 @@ export function exportStudentComprehensiveReport(args: {
   // Student Info
   yPos += 8;
   doc.setFontSize(12);
-  doc.setFont(undefined, "bold");
+  doc.setFont("helvetica", "bold");
   doc.text("Student Information", 14, (yPos += 6));
   doc.setFontSize(11);
-  doc.setFont(undefined, "normal");
+  doc.setFont("helvetica", "normal");
   doc.text(`Month: ${monthLabel}`, 14, (yPos += 5));
   doc.text(`Name: ${args.student.fullName}`, 14, (yPos += 5));
   doc.text(`Email: ${args.student.email || "-"}`, 14, (yPos += 4));
@@ -158,7 +163,7 @@ export function exportStudentComprehensiveReport(args: {
   // Attendance Summary
   yPos += 6;
   doc.setFontSize(12);
-  doc.setFont(undefined, "bold");
+  doc.setFont("helvetica", "bold");
   doc.text("Attendance Summary", 14, (yPos += 6));
 
   const completedSessions = monthSessions.filter((s) => s.status !== "scheduled");
@@ -172,13 +177,13 @@ export function exportStudentComprehensiveReport(args: {
   const { rating, color } = getAttendanceRating(totalCompleted, attendedCount, missedCount, tutorCanceledCount);
 
   doc.setFontSize(11);
-  doc.setFont(undefined, "normal");
+  doc.setFont("helvetica", "normal");
   doc.text(`Total Completed Classes: ${totalCompleted}`, 14, (yPos += 5));
   doc.text(`Attended: ${attendedCount}`, 14, (yPos += 4));
   doc.text(`Missed: ${missedCount}`, 14, (yPos += 4));
   doc.text(`Tutor Canceled: ${tutorCanceledCount}`, 14, (yPos += 4));
 
-  doc.setFont(undefined, "bold");
+  doc.setFont("helvetica", "bold");
   doc.setTextColor(...color);
   yPos += 4;
   doc.text(`Assessment: ${rating}`, 14, (yPos += 4));
@@ -188,7 +193,7 @@ export function exportStudentComprehensiveReport(args: {
   if (monthSessions.length > 0) {
     yPos += 6;
     doc.setFontSize(12);
-    doc.setFont(undefined, "bold");
+    doc.setFont("helvetica", "bold");
     doc.text(`${monthLabel} Classes`, 14, (yPos += 6));
 
     const monthData = monthSessions.slice(0, 15).map((s) => [
@@ -212,7 +217,7 @@ export function exportStudentComprehensiveReport(args: {
   if (monthPayments.length > 0) {
     yPos += 6;
     doc.setFontSize(12);
-    doc.setFont(undefined, "bold");
+    doc.setFont("helvetica", "bold");
     doc.text(`${monthLabel} Payment History`, 14, (yPos += 6));
 
     const paymentData = monthPayments
@@ -237,7 +242,7 @@ export function exportStudentComprehensiveReport(args: {
   // Payment Status
   yPos += 6;
   doc.setFontSize(12);
-  doc.setFont(undefined, "bold");
+  doc.setFont("helvetica", "bold");
   doc.text("Payment Status", 14, (yPos += 6));
 
   const totalChargedCents = args.sessions.reduce((sum, s) => sum + (s.chargeCents ?? 0), 0);
@@ -247,7 +252,7 @@ export function exportStudentComprehensiveReport(args: {
   const dueAmountCents = Math.max(0, totalChargedCents - totalPaidCents);
 
   doc.setFontSize(11);
-  doc.setFont(undefined, "normal");
+  doc.setFont("helvetica", "normal");
   doc.text(`Total Charged: ${money(totalChargedCents)}`, 14, (yPos += 5));
   doc.text(`Total Paid: ${money(totalPaidCents)}`, 14, (yPos += 4));
   doc.text(`Amount Due: ${money(dueAmountCents)}`, 14, (yPos += 4));
