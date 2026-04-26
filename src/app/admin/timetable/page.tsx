@@ -214,6 +214,7 @@ export default function TimetablePage() {
   useEffect(() => {
     if (loading) return;
     if (!user) {
+      setCheckingRole(false);
       router.replace("/login");
       return;
     }
@@ -292,8 +293,6 @@ export default function TimetablePage() {
     const map = new Map<Day, SlotDoc[]>();
     for (const d of DAYS) map.set(d, []);
     for (const s of sortedSlots) {
-      if (!s.active) continue;
-      if (s.students.length === 0) continue;
       map.set(s.day, [...(map.get(s.day) ?? []), s]);
     }
     return map;
@@ -719,80 +718,133 @@ export default function TimetablePage() {
       </div>
 
       <div className="card p-6">
-        <div className="font-semibold">Create slot</div>
-        <form className="mt-4 grid gap-3 md:grid-cols-4" onSubmit={createSlot}>
-          <div className="space-y-1">
-            <div className="label">Day</div>
-            <select
-              className="input"
-              value={createDay}
-              onChange={(e) => setCreateDay(e.target.value as Day)}
-            >
-              {DAYS.map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <div className="label">Start time</div>
-            <input
-              className="input"
-              value={createStartTime}
-              onChange={(e) => setCreateStartTime(e.target.value)}
-              type="time"
-            />
-          </div>
-          <div className="space-y-1">
-            <div className="label">End time</div>
-            <input
-              className="input"
-              value={createEndTime}
-              onChange={(e) => setCreateEndTime(e.target.value)}
-              type="time"
-            />
-          </div>
-          <div className="space-y-1">
-            <div className="label">Duration</div>
-            <div className="input bg-black/5 dark:bg-white/5">
-              {computeDuration(createStartTime, createEndTime)} min
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="font-semibold">Create slot</div>
+            <div className="mt-1 text-xs text-[rgb(var(--muted))]">
+              Build a weekly class block with optional student assignment.
             </div>
           </div>
-          <div className="space-y-1 md:col-span-2">
-            <div className="label">Students (optional)</div>
-            <div className="max-h-40 space-y-1 overflow-auto rounded-lg border border-[rgb(var(--border))] p-2">
-              {students
-                .filter((s) => s.active)
-                .map((s) => (
-                  <label key={s.id} className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={createStudentIds.includes(s.id)}
-                      onChange={(e) => {
-                        setCreateStudentIds((prev) =>
-                          e.target.checked
-                            ? [...prev, s.id]
-                            : prev.filter((x) => x !== s.id),
-                        );
-                      }}
-                    />
-                    <span>{s.fullName}</span>
-                  </label>
-                ))}
+          <div className="rounded-lg border border-[rgb(var(--border))] bg-black/5 px-3 py-2 text-xs dark:bg-white/5">
+            Selected students: <span className="font-semibold">{createStudentIds.length}</span>
+          </div>
+        </div>
+        <form className="mt-4 grid gap-4 xl:grid-cols-[1fr_320px]" onSubmit={createSlot}>
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-4">
+              <div className="space-y-1">
+                <div className="label">Day</div>
+                <select
+                  className="input"
+                  value={createDay}
+                  onChange={(e) => setCreateDay(e.target.value as Day)}
+                >
+                  {DAYS.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <div className="label">Start time</div>
+                <input
+                  className="input"
+                  value={createStartTime}
+                  onChange={(e) => setCreateStartTime(e.target.value)}
+                  type="time"
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="label">End time</div>
+                <input
+                  className="input"
+                  value={createEndTime}
+                  onChange={(e) => setCreateEndTime(e.target.value)}
+                  type="time"
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="label">Duration</div>
+                <div className="input bg-black/5 dark:bg-white/5">
+                  {computeDuration(createStartTime, createEndTime)} min
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="label">Students (optional)</div>
+              <details className="group rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--bg))]">
+                <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-sm">
+                  <span className="text-[rgb(var(--muted))]">
+                    {createStudentIds.length > 0
+                      ? `${createStudentIds.length} student(s) selected`
+                      : "Assign students now or leave unassigned"}
+                  </span>
+                  <span className="text-xs text-[rgb(var(--muted))] transition group-open:rotate-180">
+                    ▼
+                  </span>
+                </summary>
+                <div className="max-h-44 space-y-1 overflow-auto border-t border-[rgb(var(--border))] p-2">
+                  {students
+                    .filter((s) => s.active)
+                    .map((s) => (
+                      <label
+                        key={s.id}
+                        className="flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm hover:bg-black/5 dark:hover:bg-white/5"
+                      >
+                        <span>{s.fullName}</span>
+                        <input
+                          type="checkbox"
+                          checked={createStudentIds.includes(s.id)}
+                          onChange={(e) => {
+                            setCreateStudentIds((prev) =>
+                              e.target.checked
+                                ? [...prev, s.id]
+                                : prev.filter((x) => x !== s.id),
+                            );
+                          }}
+                        />
+                      </label>
+                    ))}
+                </div>
+              </details>
+            </div>
+
+            <div className="space-y-1">
+              <div className="label">Notes (optional)</div>
+              <input
+                className="input"
+                value={createNotes}
+                onChange={(e) => setCreateNotes(e.target.value)}
+                placeholder="Any special notes"
+              />
             </div>
           </div>
-          <div className="space-y-1 md:col-span-2">
-            <div className="label">Notes (optional)</div>
-            <input
-              className="input"
-              value={createNotes}
-              onChange={(e) => setCreateNotes(e.target.value)}
-              placeholder="Any special notes"
-            />
-          </div>
-          <div className="md:col-span-4 flex justify-end">
-            <button className="btn btn-primary">Add slot</button>
+
+          <div className="card p-4">
+            <div className="text-sm font-semibold">Slot preview</div>
+            <div className="mt-3 space-y-2 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-[rgb(var(--muted))]">When</span>
+                <span className="font-medium">{createDay}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[rgb(var(--muted))]">Time</span>
+                <span className="font-medium">
+                  {createStartTime} - {createEndTime}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[rgb(var(--muted))]">Duration</span>
+                <span className="font-medium">{computeDuration(createStartTime, createEndTime)} min</span>
+              </div>
+              <div className="flex items-center justify-between border-t border-[rgb(var(--border))] pt-2">
+                <span className="text-[rgb(var(--muted))]">Students</span>
+                <span className="font-semibold">{createStudentIds.length}</span>
+              </div>
+            </div>
+            <button className="btn btn-primary mt-4 w-full">Add slot</button>
           </div>
         </form>
         <div className="mt-2 text-xs text-[rgb(var(--muted))]">
@@ -841,16 +893,18 @@ export default function TimetablePage() {
                   <div className="mt-3 space-y-2">
                     {daySlots.length === 0 ? (
                       <div className="rounded-lg border border-dashed border-[rgb(var(--border))] p-3 text-sm text-[rgb(var(--muted))]">
-                        No active assigned slots for this day.
+                        No timetable blocks for this day.
                       </div>
                     ) : (
                       daySlots.map((slot) => (
                         <div
                           key={slot.id}
                           className={`rounded-lg border p-3 text-sm ${
-                            slot.isLocked
-                              ? "border-[rgb(var(--border))] bg-black/5 opacity-85 dark:bg-white/5"
-                              : "border-blue-300 bg-blue-100/50 dark:border-blue-500 dark:bg-blue-900/30"
+                            !slot.active
+                              ? "border-slate-400/60 bg-slate-500/10 opacity-70 dark:bg-slate-500/15"
+                              : slot.isLocked
+                                ? "border-[rgb(var(--border))] bg-black/5 opacity-85 dark:bg-white/5"
+                                : "border-blue-300 bg-blue-100/50 dark:border-blue-500 dark:bg-blue-900/30"
                           }`}
                         >
                           <div className="flex items-start justify-between gap-3">
@@ -861,13 +915,20 @@ export default function TimetablePage() {
                               <div className="text-xs text-[rgb(var(--muted))]">{slot.duration} min</div>
                             </div>
                             <div className="text-xs font-medium text-[rgb(var(--muted))]">
-                              {slot.isLocked ? "LOCKED" : "EDIT MODE"}
+                              {!slot.active ? "BLOCKED" : slot.isLocked ? "LOCKED" : "EDIT MODE"}
                             </div>
                           </div>
                           <div className="mt-2 text-sm">
-                            {slot.students.length > 0 ? slot.students.map((st) => st.name).join(", ") : "Unassigned"}
+                            {!slot.active
+                              ? "Unavailable"
+                              : slot.students.length > 0
+                                ? slot.students.map((st) => st.name).join(", ")
+                                : "Unassigned"}
                           </div>
                           {slot.notes ? <div className="mt-1 text-xs text-[rgb(var(--muted))]">{slot.notes}</div> : null}
+                          <div className="mt-2 text-xs text-[rgb(var(--muted))]">
+                            {slot.active ? "Available" : "Blocked time"}
+                          </div>
                           <div className="mt-2 text-xs text-[rgb(var(--muted))]">
                             Edit details in List view.
                           </div>

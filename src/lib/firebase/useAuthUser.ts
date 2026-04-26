@@ -9,11 +9,18 @@ export function useAuthUser() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setLoading(false);
+    }, 5000);
+
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
     });
-    return () => unsub();
+    return () => {
+      window.clearTimeout(timeoutId);
+      unsub();
+    };
   }, []);
 
   return { user, loading };

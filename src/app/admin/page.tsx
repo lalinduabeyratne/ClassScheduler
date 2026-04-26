@@ -1,6 +1,6 @@
 "use client";
 
-import { addDoc, collection, deleteDoc, doc, updateDoc } from "firebase/firestore";
+import { addDoc, arrayUnion, collection, deleteDoc, doc, updateDoc } from "firebase/firestore";
 import { FirebaseError } from "firebase/app";
 import { getDownloadURL, ref } from "firebase/storage";
 import { useRouter } from "next/navigation";
@@ -85,6 +85,12 @@ function statusButtonClass(active: boolean, kind: "attended" | "tutor_cancel" | 
   return active ? "bg-rose-600 text-white border-rose-600" : "border-rose-400 text-rose-700 dark:text-rose-300";
 }
 
+function statusLabel(status: AttendanceStatus) {
+  return status
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
 export default function AdminPage() {
   const router = useRouter();
   const { user, loading } = useAuthUser();
@@ -113,10 +119,15 @@ export default function AdminPage() {
   const [paymentNotes, setPaymentNotes] = useState("");
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [openingSlipPaymentId, setOpeningSlipPaymentId] = useState<string | null>(null);
+  const [showAllOutstanding, setShowAllOutstanding] = useState(false);
+  const [showAllFeeSetup, setShowAllFeeSetup] = useState(false);
+  const [showAllTotals, setShowAllTotals] = useState(false);
+  const [showAllMonthlySummary, setShowAllMonthlySummary] = useState(false);
 
   useEffect(() => {
     if (loading) return;
     if (!user) {
+      setCheckingRole(false);
       router.replace("/login");
       return;
     }
@@ -259,6 +270,21 @@ export default function AdminPage() {
     [studentSummaries],
   );
 
+  const visibleOutstandingStudents = useMemo(
+    () => (showAllOutstanding ? outstandingStudents : outstandingStudents.slice(0, 10)),
+    [outstandingStudents, showAllOutstanding],
+  );
+
+  const visibleFeeSetupStudents = useMemo(
+    () => (showAllFeeSetup ? students : students.slice(0, 12)),
+    [showAllFeeSetup, students],
+  );
+
+  const visibleStudentSummaries = useMemo(
+    () => (showAllTotals ? studentSummaries : studentSummaries.slice(0, 12)),
+    [showAllTotals, studentSummaries],
+  );
+
   const monthlySummaries = useMemo(() => {
     return students.map((student) =>
       computeMonthlySummary({
@@ -269,6 +295,11 @@ export default function AdminPage() {
       }),
     );
   }, [allPayments, allSessions, selectedMonth, students]);
+
+  const visibleMonthlySummaries = useMemo(
+    () => (showAllMonthlySummary ? monthlySummaries : monthlySummaries.slice(0, 12)),
+    [monthlySummaries, showAllMonthlySummary],
+  );
 
   const paymentTargetBalance = useMemo(() => {
     if (!paymentStudentId) return null;
@@ -496,14 +527,54 @@ export default function AdminPage() {
       <div className="card p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="font-semibold">Outstanding by student</div>
-          <div className="text-xs text-[rgb(var(--muted))]">
-            {outstandingStudents.length} student{outstandingStudents.length === 1 ? "" : "s"} owe money right now
+          <div className="flex items-center gap-2">
+            <div className="text-xs text-[rgb(var(--muted))]">
+              {outstandingStudents.length} student{outstandingStudents.length === 1 ? "" : "s"} owe money right now
+            </div>
+            {outstandingStudents.length > 10 ? (
+              <button className="btn btn-ghost" onClick={() => setShowAllOutstanding((v) => !v)}>
+                {showAllOutstanding ? "Show less" : "Show all"}
+              </button>
+            ) : null}
           </div>
         </div>
         <div className="mt-1 text-xs text-[rgb(var(--muted))]">
           Shows only currently unpaid amounts after verified payments are deducted.
         </div>
-        <div className="mt-3 overflow-x-auto">
+        <div className="mt-3 grid gap-3 md:hidden">
+          {visibleOutstandingStudents.map((row) => (
+            <div key={row.studentId} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-medium">{row.studentName}</div>
+                  <div className="text-xs text-[rgb(var(--muted))] font-mono">{row.studentId}</div>
+                </div>
+                <div className="text-right text-sm">
+                  <div className="text-[rgb(var(--muted))]">Due</div>
+                  <div className="font-semibold text-rose-500">{formatMoneyLKR(row.dueCents)}</div>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-lg bg-black/5 p-3 dark:bg-white/5">
+                  <div className="text-[rgb(var(--muted))]">Earned</div>
+                  <div className="font-semibold">{formatMoneyLKR(row.earnedCents)}</div>
+                </div>
+                <div className="rounded-lg bg-black/5 p-3 dark:bg-white/5">
+                  <div className="text-[rgb(var(--muted))]">Balance</div>
+                  <div className={`font-semibold ${row.balanceCents > 0 ? "text-rose-500" : "text-emerald-500"}`}>
+                    {formatMoneyLKR(row.balanceCents)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+          {outstandingStudents.length === 0 ? (
+            <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4 text-sm text-[rgb(var(--muted))]">
+              No outstanding balances right now.
+            </div>
+          ) : null}
+        </div>
+        <div className="mt-3 hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
             <thead className="text-left text-[rgb(var(--muted))]">
               <tr className="border-b border-[rgb(var(--border))]">
@@ -513,7 +584,7 @@ export default function AdminPage() {
               </tr>
             </thead>
             <tbody>
-              {outstandingStudents.map((row) => (
+              {visibleOutstandingStudents.map((row) => (
                 <tr key={row.studentId} className="border-b border-[rgb(var(--border))]">
                   <td className="py-2 pr-3">{row.studentName}</td>
                   <td className="py-2 pr-3 text-right">{formatMoneyLKR(row.earnedCents)}</td>
@@ -533,11 +604,48 @@ export default function AdminPage() {
       </div>
 
       <div className="card p-6">
-        <div className="font-semibold">Fee setup per student</div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="font-semibold">Fee setup per student</div>
+          {students.length > 12 ? (
+            <button className="btn btn-ghost" onClick={() => setShowAllFeeSetup((v) => !v)}>
+              {showAllFeeSetup ? "Show less" : "Show all"}
+            </button>
+          ) : null}
+        </div>
         <div className="mt-2 text-xs text-[rgb(var(--muted))]">
           Session charge is snapshot per session and is not recalculated later.
         </div>
-        <div className="mt-3 overflow-x-auto">
+        <div className="mt-3 grid gap-3 md:hidden">
+          {visibleFeeSetupStudents.map((s) => (
+            <div key={s.id} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4">
+              <div className="font-medium">{s.fullName}</div>
+              <div className="text-xs text-[rgb(var(--muted))] font-mono">{s.id}</div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <div className="label">Rate per session (LKR)</div>
+                  <input className="input" defaultValue={(s.feePerSessionCents / 100).toFixed(2)} id={`fee-mobile-${s.id}`} inputMode="decimal" />
+                </div>
+                <div className="space-y-1">
+                  <div className="label">Session duration (min)</div>
+                  <input className="input" defaultValue={String(s.sessionDurationMin)} id={`dur-mobile-${s.id}`} inputMode="numeric" />
+                </div>
+              </div>
+              <div className="mt-4 flex justify-end">
+                <button
+                  className="btn btn-primary w-full sm:w-auto"
+                  onClick={() => {
+                    const feeEl = document.getElementById(`fee-mobile-${s.id}`) as HTMLInputElement | null;
+                    const durEl = document.getElementById(`dur-mobile-${s.id}`) as HTMLInputElement | null;
+                    void saveStudentFeeConfig(s.id, feeEl?.value ?? "", durEl?.value ?? "");
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
             <thead className="text-left text-[rgb(var(--muted))]">
               <tr className="border-b border-[rgb(var(--border))]">
@@ -548,7 +656,7 @@ export default function AdminPage() {
               </tr>
             </thead>
             <tbody>
-              {students.map((s) => {
+              {visibleFeeSetupStudents.map((s) => {
                 return (
                   <tr key={s.id} className="border-b border-[rgb(var(--border))]">
                     <td className="py-2 pr-3">
@@ -591,7 +699,66 @@ export default function AdminPage() {
         <div className="mt-2 text-xs text-[rgb(var(--muted))]">
           Marking status updates financial charge instantly: attended = 100%, tutor cancel = 0%, early cancel = 0%, late cancel = 50%, no show = 100%.
         </div>
-        <div className="mt-3 overflow-x-auto">
+        <div className="mt-3 grid gap-3 md:hidden">
+          {todaySessions.map((s) => (
+            <div key={s.id} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold">{studentsById.get(s.studentId)?.fullName ?? s.studentId}</div>
+                  <div className="text-xs text-[rgb(var(--muted))] font-mono">{s.studentId}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-[rgb(var(--muted))]">Time</div>
+                  <div className="font-semibold">{formatTime(s.startAt)}</div>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className={`status-pill ${s.status === "attended" ? "status-attended" : "status-scheduled"}`}>
+                  {statusLabel(s.status)}
+                </span>
+                <span className="status-pill status-scheduled">{formatMoneyLKR(s.chargeCents)}</span>
+              </div>
+              <div className="mt-4 grid gap-2">
+                <button
+                  className={`btn w-full ${statusButtonClass(s.status === "attended", "attended")}`}
+                  onClick={() => void markSessionStatus(s, "attended")}
+                >
+                  Attended
+                </button>
+                <button
+                  className={`btn w-full ${statusButtonClass(s.status === "tutor_cancel", "tutor_cancel")}`}
+                  onClick={() => void markSessionStatus(s, "tutor_cancel")}
+                >
+                  Tutor cancel
+                </button>
+                <button
+                  className={`btn w-full ${statusButtonClass(s.status === "early_cancel", "early_cancel")}`}
+                  onClick={() => void markSessionStatus(s, "early_cancel")}
+                >
+                  Early cancel
+                </button>
+                <button
+                  className={`btn w-full ${statusButtonClass(s.status === "late_cancel", "late_cancel")}`}
+                  onClick={() => void markSessionStatus(s, "late_cancel")}
+                >
+                  Late cancel
+                </button>
+                <button
+                  className={`btn w-full ${statusButtonClass(s.status === "no_show", "no_show")}`}
+                  onClick={() => void markSessionStatus(s, "no_show")}
+                >
+                  No show
+                </button>
+              </div>
+            </div>
+          ))}
+          {todaySessions.length === 0 ? (
+            <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4 text-sm text-[rgb(var(--muted))]">
+              No sessions found for today.
+            </div>
+          ) : null}
+        </div>
+        <div className="mt-3 hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
             <thead className="text-left text-[rgb(var(--muted))]">
               <tr className="border-b border-[rgb(var(--border))]">
@@ -717,8 +884,39 @@ export default function AdminPage() {
       </div>
 
       <div className="card p-6">
-        <div className="font-semibold">Per-student totals to date</div>
-        <div className="mt-3 overflow-x-auto">
+        <div className="flex items-center justify-between gap-2">
+          <div className="font-semibold">Per-student totals to date</div>
+          {studentSummaries.length > 12 ? (
+            <button className="btn btn-ghost" onClick={() => setShowAllTotals((v) => !v)}>
+              {showAllTotals ? "Show less" : "Show all"}
+            </button>
+          ) : null}
+        </div>
+        <div className="mt-3 grid gap-3 md:hidden">
+          {visibleStudentSummaries.map((row) => (
+            <div key={row.studentId} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4">
+              <div className="font-medium">{row.studentName}</div>
+              <div className="text-xs text-[rgb(var(--muted))] font-mono">{row.studentId}</div>
+              <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <div className="text-[rgb(var(--muted))]">Earned</div>
+                  <div className="font-semibold">{formatMoneyLKR(row.earnedCents)}</div>
+                </div>
+                <div>
+                  <div className="text-[rgb(var(--muted))]">Paid</div>
+                  <div className="font-semibold">{formatMoneyLKR(row.paidCents)}</div>
+                </div>
+                <div className="col-span-2 rounded-lg bg-black/5 p-3 dark:bg-white/5">
+                  <div className="text-[rgb(var(--muted))]">Balance</div>
+                  <div className={`font-semibold ${row.balanceCents > 0 ? "text-rose-500" : "text-emerald-500"}`}>
+                    {formatMoneyLKR(row.balanceCents)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
             <thead className="text-left text-[rgb(var(--muted))]">
               <tr className="border-b border-[rgb(var(--border))]">
@@ -729,7 +927,7 @@ export default function AdminPage() {
               </tr>
             </thead>
             <tbody>
-              {studentSummaries.map((row) => (
+              {visibleStudentSummaries.map((row) => (
                 <tr key={row.studentId} className="border-b border-[rgb(var(--border))]">
                   <td className="py-2 pr-3">
                     <div className="font-medium">{row.studentName}</div>
@@ -752,12 +950,39 @@ export default function AdminPage() {
           <div className="font-semibold">Monthly summary</div>
           <div className="flex items-center gap-2">
             <input className="input" type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} />
+            {monthlySummaries.length > 12 ? (
+              <button className="btn btn-ghost" onClick={() => setShowAllMonthlySummary((v) => !v)}>
+                {showAllMonthlySummary ? "Show less" : "Show all"}
+              </button>
+            ) : null}
           </div>
         </div>
         <div className="mt-1 text-xs text-[rgb(var(--muted))]">
           Closing due and credit include carry-forward from prior months.
         </div>
-        <div className="mt-3 overflow-x-auto">
+        <div className="mt-3 grid gap-3 md:hidden">
+          {visibleMonthlySummaries.map((row) => (
+            <div key={row.studentId} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4">
+              <div className="font-medium">{studentsById.get(row.studentId)?.fullName ?? row.studentId}</div>
+              <div className="text-xs text-[rgb(var(--muted))] font-mono">{row.studentId}</div>
+              <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                <div><div className="text-[rgb(var(--muted))]">Opening</div><div className="font-semibold">{formatMoneyLKR(row.openingBalanceCents)}</div></div>
+                <div><div className="text-[rgb(var(--muted))]">Sessions</div><div className="font-semibold">{row.totalSessions}</div></div>
+                <div><div className="text-[rgb(var(--muted))]">Attended</div><div className="font-semibold">{row.attendedCount}</div></div>
+                <div><div className="text-[rgb(var(--muted))]">Late cancel</div><div className="font-semibold">{row.lateCancelCount}</div></div>
+                <div><div className="text-[rgb(var(--muted))]">No show</div><div className="font-semibold">{row.noShowCount}</div></div>
+                <div><div className="text-[rgb(var(--muted))]">Earned</div><div className="font-semibold">{formatMoneyLKR(row.totalEarnedCents)}</div></div>
+                <div><div className="text-[rgb(var(--muted))]">Paid</div><div className="font-semibold">{formatMoneyLKR(row.totalPaidCents)}</div></div>
+                <div><div className="text-[rgb(var(--muted))]">Closing due</div><div className="font-semibold text-rose-500">{formatMoneyLKR(row.dueCents)}</div></div>
+                <div className="col-span-2 rounded-lg bg-black/5 p-3 dark:bg-white/5">
+                  <div className="text-[rgb(var(--muted))]">Closing credit</div>
+                  <div className="font-semibold text-emerald-500">{formatMoneyLKR(row.creditCents)}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
             <thead className="text-left text-[rgb(var(--muted))]">
               <tr className="border-b border-[rgb(var(--border))]">
@@ -774,7 +999,7 @@ export default function AdminPage() {
               </tr>
             </thead>
             <tbody>
-              {monthlySummaries.map((row) => (
+              {visibleMonthlySummaries.map((row) => (
                 <tr key={row.studentId} className="border-b border-[rgb(var(--border))]">
                   <td className="py-2 pr-3">{studentsById.get(row.studentId)?.fullName ?? row.studentId}</td>
                   <td className={`py-2 pr-3 text-right font-semibold ${row.openingBalanceCents > 0 ? "text-rose-500" : row.openingBalanceCents < 0 ? "text-emerald-500" : ""}`}>
@@ -837,7 +1062,39 @@ export default function AdminPage() {
             {slipActionError}
           </div>
         ) : null}
-        <div className="mt-3 overflow-x-auto">
+        <div className="mt-3 grid gap-3 md:hidden">
+          {sortedPendingPayments.map((p) => (
+            <div key={p.id} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-medium">{studentsById.get(p.studentId)?.fullName ?? p.studentId}</div>
+                  <div className="text-xs text-[rgb(var(--muted))] font-mono">{p.studentId}</div>
+                </div>
+                <div className="text-right font-semibold">{formatMoneyLKR(p.amountCents)}</div>
+              </div>
+              <div className="mt-3 text-sm text-[rgb(var(--muted))]">{(p.paymentType ?? "single").replaceAll("_", " ")}</div>
+              <div className="mt-1 text-xs text-[rgb(var(--muted))]">{p.coverageNote ?? "-"}</div>
+              <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <button className="btn btn-primary w-full" onClick={async () => { await updateDoc(doc(db, "payments", p.id), { status: "verified" }); }}>
+                  Verify
+                </button>
+                <button className="btn btn-ghost w-full" onClick={async () => { await updateDoc(doc(db, "payments", p.id), { status: "rejected" }); }}>
+                  Reject
+                </button>
+                <button className="btn btn-ghost w-full" onClick={() => void deletePayment(p)}>
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+          {pendingLoading ? (
+            <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4 text-sm text-[rgb(var(--muted))]">Loading...</div>
+          ) : null}
+          {sortedPendingPayments.length === 0 ? (
+            <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4 text-sm text-[rgb(var(--muted))]">No pending payments.</div>
+          ) : null}
+        </div>
+        <div className="mt-3 hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
             <thead className="text-left text-[rgb(var(--muted))]">
               <tr className="border-b border-[rgb(var(--border))]">
@@ -924,7 +1181,78 @@ export default function AdminPage() {
             {pendingReschedulesError}
           </div>
         ) : null}
-        <div className="mt-3 overflow-x-auto">
+        <div className="mt-3 grid gap-3 md:hidden">
+          {sortedPendingReschedules.map((r: any) => (
+            <div key={r.id} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4">
+              <div className="font-medium">{studentsById.get(String(r.studentId ?? ""))?.fullName ?? String(r.studentId ?? "")}</div>
+              <div className="text-xs text-[rgb(var(--muted))] font-mono">{String(r.studentId ?? "")}</div>
+              <div className="mt-3 text-sm text-[rgb(var(--muted))]">From session: {String(r.fromSessionId ?? "")}</div>
+              <div className="mt-1 text-sm text-[rgb(var(--muted))]">
+                Requested: {r.requestedStartAt ? new Date(Number(r.requestedStartAt)).toLocaleString() : "-"}
+              </div>
+              <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <button
+                  className="btn btn-primary w-full"
+                  onClick={async () => {
+                    const reqId = String(r.id);
+                    const fromSessionId = String(r.fromSessionId);
+                    const session = allSessions.find((s) => s.id === fromSessionId);
+                    const requestedStartAt = Number(r.requestedStartAt);
+                    const requestedEndAt = Number(r.requestedEndAt);
+                    const rescheduleNote = `rescheduled to ${new Date(requestedStartAt).toLocaleString("en-LK", {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })}`;
+
+                    if (!session) {
+                      throw new Error("Original session could not be found.");
+                    }
+
+                    await updateDoc(doc(db, "sessions", fromSessionId), {
+                      startAt: requestedStartAt,
+                      endAt: requestedEndAt,
+                      createdFrom: "reschedule",
+                    });
+
+                    if (session.slotId) {
+                      const slotRef = doc(db, col.timetableSlots(), session.slotId);
+                      await updateDoc(slotRef, {
+                        exceptions: arrayUnion(
+                          `${new Date(session.startAt).toISOString().slice(0, 10)} | ${rescheduleNote}`,
+                        ),
+                      });
+                    }
+
+                    await updateDoc(doc(db, "rescheduleRequests", reqId), {
+                      status: "approved",
+                      updatedAt: Date.now(),
+                    });
+                  }}
+                >
+                  Approve
+                </button>
+                <button
+                  className="btn btn-ghost w-full"
+                  onClick={async () => {
+                    const reqId = String(r.id);
+                    await updateDoc(doc(db, "rescheduleRequests", reqId), {
+                      status: "rejected",
+                      updatedAt: Date.now(),
+                    });
+                  }}
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          ))}
+          {!pendingReschedulesError && sortedPendingReschedules.length === 0 ? (
+            <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4 text-sm text-[rgb(var(--muted))]">
+              No reschedule requests.
+            </div>
+          ) : null}
+        </div>
+        <div className="mt-3 hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
             <thead className="text-left text-[rgb(var(--muted))]">
               <tr className="border-b border-[rgb(var(--border))]">
@@ -956,13 +1284,33 @@ export default function AdminPage() {
                         onClick={async () => {
                           const reqId = String(r.id);
                           const fromSessionId = String(r.fromSessionId);
+                          const session = allSessions.find((s) => s.id === fromSessionId);
                           const requestedStartAt = Number(r.requestedStartAt);
                           const requestedEndAt = Number(r.requestedEndAt);
+                          const rescheduleNote = `rescheduled to ${new Date(requestedStartAt).toLocaleString("en-LK", {
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                          })}`;
+
+                          if (!session) {
+                            throw new Error("Original session could not be found.");
+                          }
+
                           await updateDoc(doc(db, "sessions", fromSessionId), {
                             startAt: requestedStartAt,
                             endAt: requestedEndAt,
                             createdFrom: "reschedule",
                           });
+
+                          if (session.slotId) {
+                            const slotRef = doc(db, col.timetableSlots(), session.slotId);
+                            await updateDoc(slotRef, {
+                              exceptions: arrayUnion(
+                                `${new Date(session.startAt).toISOString().slice(0, 10)} | ${rescheduleNote}`,
+                              ),
+                            });
+                          }
+
                           await updateDoc(doc(db, "rescheduleRequests", reqId), {
                             status: "approved",
                             updatedAt: Date.now(),

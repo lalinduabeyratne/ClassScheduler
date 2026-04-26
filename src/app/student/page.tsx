@@ -196,6 +196,7 @@ export default function StudentPage() {
   useEffect(() => {
     if (loading) return;
     if (!user) {
+      setCheckingRole(false);
       router.replace("/login");
       return;
     }

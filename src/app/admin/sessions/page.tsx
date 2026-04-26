@@ -38,6 +38,11 @@ function combineDateTimeMs(dateValue: string, timeValue: string) {
 }
 
 function statusClass(active: boolean, status: AttendanceStatus) {
+  if (status === "scheduled") {
+    return active
+      ? "bg-sky-600 border-sky-600 text-white"
+      : "border-sky-400 text-sky-700 dark:text-sky-300";
+  }
   if (status === "attended") {
     return active
       ? "bg-emerald-600 border-emerald-600 text-white"
@@ -63,6 +68,12 @@ function statusClass(active: boolean, status: AttendanceStatus) {
     : "border-slate-400 text-slate-700 dark:text-slate-300";
 }
 
+function statusLabel(status: AttendanceStatus) {
+  return status
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
 export default function AdminSessionsHistoryPage() {
   const router = useRouter();
   const { user, loading } = useAuthUser();
@@ -85,10 +96,17 @@ export default function AdminSessionsHistoryPage() {
     session: Session;
     timeoutId: ReturnType<typeof setTimeout>;
   } | null>(null);
+  const [pendingStatusUndo, setPendingStatusUndo] = useState<{
+    sessionId: string;
+    prevStatus: AttendanceStatus;
+    prevChargeCents: number;
+    timeoutId: ReturnType<typeof setTimeout>;
+  } | null>(null);
 
   useEffect(() => {
     if (loading) return;
     if (!user) {
+      setCheckingRole(false);
       router.replace("/login");
       return;
     }
@@ -180,6 +198,14 @@ export default function AdminSessionsHistoryPage() {
       && Number.isFinite(parsedDurationMin)
       && parsedDurationMin > 0,
   );
+  const projectedChargeCents = useMemo(() => {
+    if (!selectedStudent) return 0;
+    return computeChargeCents({
+      feePerSessionCents: selectedStudent.feePerSessionCents,
+      status: newSessionStatus,
+    });
+  }, [newSessionStatus, selectedStudent]);
+  const projectedTotalCents = projectedChargeCents * selectedBackfillDates.length;
 
   const filteredSessions = useMemo(() => {
     const byStudent = studentFilter === "all"
@@ -193,11 +219,18 @@ export default function AdminSessionsHistoryPage() {
       if (pendingDelete) {
         clearTimeout(pendingDelete.timeoutId);
       }
+      if (pendingStatusUndo) {
+        clearTimeout(pendingStatusUndo.timeoutId);
+      }
     };
-  }, [pendingDelete]);
+  }, [pendingDelete, pendingStatusUndo]);
 
   async function updateStatus(session: Session, status: AttendanceStatus) {
     setActionError(null);
+    if (pendingStatusUndo && pendingStatusUndo.sessionId !== session.id) {
+      clearTimeout(pendingStatusUndo.timeoutId);
+      setPendingStatusUndo(null);
+    }
     if (session.feePerSessionCents <= 0) {
       setActionError("This session has no valid fee snapshot. Set student fee and regenerate session.");
       return;
@@ -213,6 +246,36 @@ export default function AdminSessionsHistoryPage() {
       chargeCents,
       statusUpdatedAt: Date.now(),
     });
+
+    if (pendingStatusUndo && pendingStatusUndo.sessionId === session.id) {
+      clearTimeout(pendingStatusUndo.timeoutId);
+    }
+    const timeoutId = setTimeout(() => {
+      setPendingStatusUndo((current) => (current?.sessionId === session.id ? null : current));
+    }, 8000);
+    setPendingStatusUndo({
+      sessionId: session.id,
+      prevStatus: session.status,
+      prevChargeCents: session.chargeCents,
+      timeoutId,
+    });
+  }
+
+  async function undoStatusChange() {
+    if (!pendingStatusUndo) return;
+    clearTimeout(pendingStatusUndo.timeoutId);
+    setActionError(null);
+    try {
+      await updateDoc(doc(db, "sessions", pendingStatusUndo.sessionId), {
+        status: pendingStatusUndo.prevStatus,
+        chargeCents: pendingStatusUndo.prevChargeCents,
+        statusUpdatedAt: Date.now(),
+      });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to undo status update.");
+    } finally {
+      setPendingStatusUndo(null);
+    }
   }
 
   async function createBackfilledSession() {
@@ -328,34 +391,57 @@ export default function AdminSessionsHistoryPage() {
       <AdminTopNav />
 
       <div className="card p-6">
-        <div className="font-semibold">Backfill a past class</div>
-        <p className="mt-1 text-sm text-[rgb(var(--muted))]">
-          Use this when a lesson already happened but was not logged yet. Mark it here and the unpaid balance will show up in the dashboard.
-        </p>
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-          <div className="space-y-1 xl:col-span-2">
-            <div className="label">Student</div>
-            <select
-              className="input"
-              value={newSessionStudentId}
-              onChange={(e) => setNewSessionStudentId(e.target.value)}
-            >
-              {studentRows.map((student) => (
-                <option key={student.id} value={student.id}>
-                  {student.fullName}
-                </option>
-              ))}
-            </select>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="font-semibold">Backfill a past class</div>
+            <p className="mt-1 text-sm text-[rgb(var(--muted))]">
+              Log missed entries quickly with multiple dates, status, and charge preview.
+            </p>
           </div>
-          <div className="space-y-1">
-            <div className="label">Class date</div>
-            <input
-              className="input"
-              type="date"
-              value={newSessionDate}
-              onChange={(e) => setNewSessionDate(e.target.value)}
-            />
-            <div className="mt-2 flex items-center gap-2">
+          <div className="text-xs text-[rgb(var(--muted))]">
+            {selectedBackfillDates.length} date{selectedBackfillDates.length > 1 ? "s" : ""} selected
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_320px]">
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="space-y-1 md:col-span-2 xl:col-span-1">
+                <div className="label">Student</div>
+                <select
+                  className="input"
+                  value={newSessionStudentId}
+                  onChange={(e) => setNewSessionStudentId(e.target.value)}
+                >
+                  {studentRows.map((student) => (
+                    <option key={student.id} value={student.id}>
+                      {student.fullName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <div className="label">Class date</div>
+                <input
+                  className="input"
+                  type="date"
+                  value={newSessionDate}
+                  onChange={(e) => setNewSessionDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="label">Duration (minutes)</div>
+                <input
+                  className="input"
+                  type="number"
+                  min="1"
+                  value={newSessionDurationMin}
+                  onChange={(e) => setNewSessionDurationMin(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
                 className="btn btn-ghost"
@@ -366,7 +452,19 @@ export default function AdminSessionsHistoryPage() {
                   );
                 }}
               >
-                Add date
+                Add selected date
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  const d = new Date();
+                  d.setDate(d.getDate() - 1);
+                  const y = dayInputValue(d);
+                  setNewSessionDates((prev) => (prev.includes(y) ? prev : [...prev, y].sort()));
+                }}
+              >
+                Add yesterday
               </button>
               <button
                 type="button"
@@ -375,104 +473,121 @@ export default function AdminSessionsHistoryPage() {
               >
                 Clear dates
               </button>
-              <div className="text-xs text-[rgb(var(--muted))]">
-                Selected: {newSessionDates.length || 1}
+            </div>
+
+            <div className="space-y-1">
+              <div className="label">Time</div>
+              <input
+                className="input max-w-[220px]"
+                type="time"
+                value={newSessionTime}
+                onChange={(e) => setNewSessionTime(e.target.value)}
+                disabled={newSessionTimeUnknown}
+              />
+              <label className="mt-2 flex items-center gap-2 text-xs text-[rgb(var(--muted))]">
+                <input
+                  type="checkbox"
+                  checked={newSessionTimeUnknown}
+                  onChange={(e) => setNewSessionTimeUnknown(e.target.checked)}
+                />
+                I don't remember the exact time
+              </label>
+            </div>
+
+            <div className="space-y-2">
+              <div className="label">Status</div>
+              <div className="flex flex-wrap gap-2">
+                {(["attended", "tutor_cancel", "late_cancel", "early_cancel", "no_show"] as AttendanceStatus[]).map(
+                  (status) => (
+                    <button
+                      key={status}
+                      type="button"
+                      className={`btn ${statusClass(newSessionStatus === status, status)}`}
+                      onClick={() => setNewSessionStatus(status)}
+                    >
+                      {status.replaceAll("_", " ")}
+                    </button>
+                  ),
+                )}
               </div>
             </div>
-          </div>
-          <div className="space-y-1">
-            <div className="label">Time</div>
-            <input
-              className="input"
-              type="time"
-              value={newSessionTime}
-              onChange={(e) => setNewSessionTime(e.target.value)}
-              disabled={newSessionTimeUnknown}
-            />
-            <label className="mt-2 flex items-center gap-2 text-xs text-[rgb(var(--muted))]">
+
+            <div className="space-y-1">
+              <div className="label">Notes</div>
               <input
-                type="checkbox"
-                checked={newSessionTimeUnknown}
-                onChange={(e) => setNewSessionTimeUnknown(e.target.checked)}
+                className="input"
+                value={newSessionNotes}
+                onChange={(e) => setNewSessionNotes(e.target.value)}
+                placeholder="Optional note about this backfilled class"
               />
-              I don't remember the exact time
-            </label>
-          </div>
-          <div className="space-y-1">
-            <div className="label">Duration</div>
-            <input
-              className="input"
-              type="number"
-              min="1"
-              value={newSessionDurationMin}
-              onChange={(e) => setNewSessionDurationMin(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <div className="label">Status</div>
-            <select
-              className="input"
-              value={newSessionStatus}
-              onChange={(e) => setNewSessionStatus(e.target.value as AttendanceStatus)}
-            >
-              <option value="attended">attended</option>
-              <option value="tutor_cancel">tutor cancel</option>
-              <option value="late_cancel">late cancel</option>
-              <option value="early_cancel">early cancel</option>
-              <option value="no_show">no show</option>
-            </select>
-          </div>
-          <div className="space-y-1 xl:col-span-5">
-            <div className="label">Notes</div>
-            <input
-              className="input"
-              value={newSessionNotes}
-              onChange={(e) => setNewSessionNotes(e.target.value)}
-              placeholder="Optional note about this backfilled class"
-            />
-          </div>
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {selectedBackfillDates.map((d) => (
-              <span key={d} className="inline-flex items-center gap-2 rounded-full border border-[rgb(var(--border))] px-3 py-1 text-xs">
-                {d}
-                <button
-                  type="button"
-                  className="text-[rgb(var(--muted))] hover:text-red-300"
-                  onClick={() => {
-                    if (newSessionDates.length === 0) return;
-                    setNewSessionDates((prev) => prev.filter((x) => x !== d));
-                  }}
-                  aria-label={`Remove ${d}`}
-                >
-                  x
-                </button>
-              </span>
-            ))}
-        </div>
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button
-            className="btn btn-primary"
-            onClick={() => void createBackfilledSession()}
-            disabled={creatingSession || !canCreateBackfill}
-          >
-            {creatingSession ? "Creating..." : `Add ${selectedBackfillDates.length} session(s)`}
-          </button>
-          {selectedStudent ? (
-            <div className="text-xs text-[rgb(var(--muted))]">
-              Fee snapshot: {formatMoneyLKR(selectedStudent.feePerSessionCents)} per session
             </div>
-          ) : null}
-          <div className="text-xs text-[rgb(var(--muted))]">
-            {canCreateBackfill
-              ? `Ready to add ${selectedBackfillDates.length} session(s).`
-              : "Choose student, date, and valid duration to enable save."}
+
+            <div className="flex flex-wrap gap-2">
+              {selectedBackfillDates.map((d) => (
+                <span
+                  key={d}
+                  className="inline-flex items-center gap-2 rounded-full border border-[rgb(var(--border))] bg-[rgb(var(--card))] px-3 py-1 text-xs"
+                >
+                  {d}
+                  <button
+                    type="button"
+                    className="text-[rgb(var(--muted))] hover:text-red-300"
+                    onClick={() => {
+                      if (newSessionDates.length === 0) return;
+                      setNewSessionDates((prev) => prev.filter((x) => x !== d));
+                    }}
+                    aria-label={`Remove ${d}`}
+                  >
+                    x
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="card p-4">
+            <div className="text-sm font-semibold">Summary</div>
+            <div className="mt-3 space-y-2 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-[rgb(var(--muted))]">Student</span>
+                <span className="font-medium">{selectedStudent?.fullName ?? "-"}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[rgb(var(--muted))]">Dates</span>
+                <span className="font-medium">{selectedBackfillDates.length}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[rgb(var(--muted))]">Status</span>
+                <span className="font-medium">{newSessionStatus.replaceAll("_", " ")}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[rgb(var(--muted))]">Per session</span>
+                <span className="font-medium">{formatMoneyLKR(projectedChargeCents)}</span>
+              </div>
+              <div className="flex items-center justify-between border-t border-[rgb(var(--border))] pt-2">
+                <span className="text-[rgb(var(--muted))]">Projected total</span>
+                <span className="font-semibold">{formatMoneyLKR(projectedTotalCents)}</span>
+              </div>
+            </div>
+
+            <button
+              className="btn btn-primary mt-4 w-full"
+              onClick={() => void createBackfilledSession()}
+              disabled={creatingSession || !canCreateBackfill}
+            >
+              {creatingSession ? "Creating..." : `Add ${selectedBackfillDates.length} session(s)`}
+            </button>
+            <div className="mt-2 text-xs text-[rgb(var(--muted))]">
+              {canCreateBackfill
+                ? "Ready to save."
+                : "Choose student, date, and valid duration to enable save."}
+            </div>
           </div>
         </div>
       </div>
 
       <div className="card p-6">
-        <div className="grid gap-3 md:grid-cols-[220px_220px_220px_1fr] md:items-end">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[220px_220px_220px_1fr] xl:items-end">
           <div className="space-y-1">
             <div className="label">Date scope</div>
             <select
@@ -530,11 +645,96 @@ export default function AdminSessionsHistoryPage() {
         </div>
       ) : null}
 
+      {pendingStatusUndo ? (
+        <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-200" aria-live="polite">
+          Status updated. Click undo to restore previous value.
+          <button className="btn btn-ghost ml-3" onClick={() => void undoStatusChange()}>
+            Undo
+          </button>
+        </div>
+      ) : null}
+
       <div className="card p-6">
         <div className="font-semibold">
           {dateScope === "all" ? "Sessions on all dates" : `Sessions on ${selectedDate}`}
         </div>
-        <div className="mt-3 overflow-x-auto">
+        <div className="mt-3 grid gap-3 md:hidden">
+          {filteredSessions.map((session) => {
+            const sessionDate = new Date(session.startAt);
+            const studentName = studentsById.get(session.studentId)?.fullName ?? session.studentId;
+
+            return (
+              <div key={session.id} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold">{studentName}</div>
+                    <div className="text-xs text-[rgb(var(--muted))] font-mono">{session.studentId}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-[rgb(var(--muted))]">Charge</div>
+                    <div className="font-semibold">{formatMoneyLKR(session.chargeCents)}</div>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <div className="text-[rgb(var(--muted))]">Date</div>
+                    <div className="font-medium">{sessionDate.toLocaleDateString()}</div>
+                  </div>
+                  <div>
+                    <div className="text-[rgb(var(--muted))]">Time</div>
+                    <div className="font-medium">{sessionDate.toLocaleTimeString()}</div>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className={`status-pill ${session.status === "scheduled" ? "status-scheduled" : session.status === "attended" ? "status-attended" : session.status === "tutor_cancel" ? "status-tutor-cancel" : session.status === "late_cancel" ? "status-late-cancel" : session.status === "early_cancel" ? "status-early-cancel" : "status-no-show"}`}>
+                    {statusLabel(session.status)}
+                  </span>
+                </div>
+
+                <div className="mt-4 grid gap-2">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {(["scheduled", "attended", "tutor_cancel", "late_cancel", "no_show", "early_cancel"] as AttendanceStatus[]).map((status) => (
+                      <button
+                        key={status}
+                        className={`btn w-full ${statusClass(session.status === status, status)}`}
+                        onClick={() => void updateStatus(session, status)}
+                      >
+                        {statusLabel(status)}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    className="btn btn-ghost w-full"
+                    onClick={() => void deleteSession(session)}
+                    disabled={pendingDelete?.session.id === session.id}
+                  >
+                    {pendingDelete?.session.id === session.id ? "Pending..." : "Delete session"}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          {!sessionsLoading && filteredSessions.length === 0 ? (
+            <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4 text-center text-sm text-[rgb(var(--muted))]">
+              <div>No sessions found for this filter.</div>
+              <div className="mt-2">
+                <button
+                  className="btn btn-ghost w-full"
+                  onClick={() => {
+                    setDateScope("all");
+                    setStudentFilter("all");
+                  }}
+                >
+                  Show all sessions
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <div className="mt-3 hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
             <thead className="text-left text-[rgb(var(--muted))]">
               <tr className="border-b border-[rgb(var(--border))]">
@@ -559,7 +759,7 @@ export default function AdminSessionsHistoryPage() {
                   </td>
                   <td className="py-2 pr-3">
                     <div className="flex flex-wrap gap-2">
-                      {(["attended", "tutor_cancel", "late_cancel", "no_show", "early_cancel"] as AttendanceStatus[]).map(
+                      {(["scheduled", "attended", "tutor_cancel", "late_cancel", "no_show", "early_cancel"] as AttendanceStatus[]).map(
                         (status) => (
                           <button
                             key={status}

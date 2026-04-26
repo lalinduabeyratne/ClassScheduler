@@ -110,6 +110,7 @@ export default function StudentTimetablePage() {
   useEffect(() => {
     if (loading) return;
     if (!user) {
+      setCheckingRole(false);
       router.replace("/login");
       return;
     }
@@ -153,10 +154,9 @@ export default function StudentTimetablePage() {
     });
   }, [rawSlots]);
 
-  /** Full active weekly schedule (same as admin’s weekly view scope). */
+  /** Full weekly schedule, including blocked slots so students can see unavailable times. */
   const scheduleSlots = useMemo(() => {
     return allParsed
-      .filter((s) => s.active)
       .sort((a, b) => {
         const dayDiff = DAYS.indexOf(a.day) - DAYS.indexOf(b.day);
         if (dayDiff !== 0) return dayDiff;
@@ -191,9 +191,9 @@ export default function StudentTimetablePage() {
       <div className="card p-6">
         <div className="text-lg font-semibold">Full weekly timetable</div>
         <p className="mt-1 text-sm text-[rgb(var(--muted))]">
-          The complete class schedule. Slots you are in are highlighted. If a slot has <strong>exceptions</strong>{" "}
-          (one-off time changes, cancellations, or notes from the tutor), they appear under that block. Your{" "}
-          <strong>Calendar</strong> page still shows the actual booked sessions.
+          The complete class schedule. Active slots show upcoming classes and blocked slots show unavailable time.
+          If a slot has <strong>exceptions</strong> (one-off time changes, cancellations, or notes from the tutor),
+          they appear under that block. Your <strong>Calendar</strong> page still shows the actual booked sessions.
         </p>
         {!studentId ? (
           <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">
@@ -226,11 +226,14 @@ export default function StudentTimetablePage() {
                 <div className="mt-3 space-y-3">
                   {list.map((slot) => {
                     const mine = slotIsMine(slot);
+                    const blocked = !slot.active;
                     return (
                     <div
                       key={slot.id}
                       className={`rounded-lg border p-4 ${
-                        mine
+                        blocked
+                          ? "border-slate-400/60 bg-slate-500/10 opacity-70"
+                          : mine
                           ? "border-[rgb(var(--brand))] bg-[rgb(var(--brand))]/8 ring-1 ring-[rgb(var(--brand))]/25"
                           : "border-[rgb(var(--border))] bg-[rgb(var(--card))]"
                       }`}
@@ -244,7 +247,11 @@ export default function StudentTimetablePage() {
                             <span className="ml-2 text-sm text-[rgb(var(--muted))]">{slot.duration} min</span>
                           ) : null}
                         </div>
-                        {mine ? (
+                        {blocked ? (
+                          <span className="shrink-0 rounded-full bg-slate-500/20 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-200">
+                            Blocked
+                          </span>
+                        ) : mine ? (
                           <span className="shrink-0 rounded-full bg-[rgb(var(--brand))] px-2.5 py-0.5 text-xs font-medium text-white">
                             Your class
                           </span>
@@ -252,10 +259,15 @@ export default function StudentTimetablePage() {
                       </div>
                       <p className="mt-2 text-sm text-[rgb(var(--fg))]">
                         <span className="text-[rgb(var(--muted))]">Class: </span>
-                        {slot.students.length > 0
+                        {blocked
+                          ? "Unavailable"
+                          : slot.students.length > 0
                           ? slot.students.map((st) => st.name || st.id).join(", ")
                           : "Unassigned"}
                       </p>
+                      {blocked ? (
+                        <p className="mt-1 text-sm text-[rgb(var(--muted))]">This time is blocked and not open for booking.</p>
+                      ) : null}
                       {slot.notes ? (
                         <p className="mt-2 text-sm text-[rgb(var(--muted))]">{slot.notes}</p>
                       ) : null}

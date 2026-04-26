@@ -34,6 +34,7 @@ export default function StudentCalendarPage() {
   useEffect(() => {
     if (loading) return;
     if (!user) {
+      setCheckingRole(false);
       router.replace("/login");
       return;
     }
@@ -93,7 +94,19 @@ export default function StudentCalendarPage() {
   }, [next7Days]);
 
   if (loading || checkingRole) {
-    return <div className="text-sm text-[rgb(var(--muted))]">Loading...</div>;
+    return (
+      <div className="mx-auto flex min-h-[70vh] w-full max-w-7xl items-center justify-center px-4 py-6 md:px-6 md:py-8">
+        <div className="card w-full max-w-md p-6 text-center">
+          <div className="text-lg font-semibold">Loading calendar</div>
+          <div className="mt-2 text-sm text-[rgb(var(--muted))]">
+            Fetching your sessions and timetable.
+          </div>
+          <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-[rgb(var(--border))]">
+            <div className="h-full w-2/3 animate-pulse rounded-full bg-[rgb(var(--brand))]" />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (accessError) {
@@ -120,25 +133,48 @@ export default function StudentCalendarPage() {
           No sessions in the next 7 days.
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {Array.from(grouped.entries()).map(([key, daySessions]) => (
-            <div key={key} className="card p-6">
-              <div className="font-semibold">{dayLabel(daySessions[0]!.startAt)}</div>
-              <ul className="mt-3 space-y-2 text-sm">
-                {daySessions.map((s) => (
-                  <li key={s.id} className="flex items-center justify-between">
-                    <div className="font-medium">
-                      {timeLabel(s.startAt)} - {timeLabel(s.endAt)}
-                    </div>
-                    <div className="text-xs text-[rgb(var(--muted))]">
-                      {s.status.replaceAll("_", " ")}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
+        <>
+          <div className="space-y-3 md:hidden">
+            {Array.from(grouped.entries()).map(([key, daySessions]) => (
+              <div key={key} className="card p-4">
+                <div className="font-semibold">{dayLabel(daySessions[0]!.startAt)}</div>
+                <ul className="mt-3 space-y-2 text-sm">
+                  {daySessions.map((s) => (
+                    <li key={s.id} className="rounded-lg border border-[rgb(var(--border))] p-3">
+                      <div className="text-xs text-[rgb(var(--muted))]">
+                        {timeLabel(s.startAt)} - {timeLabel(s.endAt)}
+                      </div>
+                      <div className="mt-1 font-medium">Session</div>
+                      <div className="mt-1 text-xs text-[rgb(var(--muted))]">
+                        {s.status.replaceAll("_", " ")}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden gap-4 md:grid md:grid-cols-2">
+            {Array.from(grouped.entries()).map(([key, daySessions]) => (
+              <div key={key} className="card p-6">
+                <div className="font-semibold">{dayLabel(daySessions[0]!.startAt)}</div>
+                <ul className="mt-3 space-y-2 text-sm">
+                  {daySessions.map((s) => (
+                    <li key={s.id} className="flex items-center justify-between">
+                      <div className="font-medium">
+                        {timeLabel(s.startAt)} - {timeLabel(s.endAt)}
+                      </div>
+                      <div className="text-xs text-[rgb(var(--muted))]">
+                        {s.status.replaceAll("_", " ")}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

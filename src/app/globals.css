@@ -91,6 +91,10 @@ textarea:focus-visible {
   @apply border-slate-400/60 bg-slate-500/10 text-slate-700 dark:text-slate-300;
 }
 
+.status-scheduled {
+  @apply border-sky-400/60 bg-sky-500/15 text-sky-700 dark:text-sky-300;
+}
+
 .home-physics-bg {
   background:
     radial-gradient(circle at 15% 30%, rgba(37, 99, 235, 0.12), transparent 35%),
@@ -281,5 +285,173 @@ textarea:focus-visible {
   100% {
     opacity: 1;
   }
+}
+
+.admin-cal-grid {
+  display: grid;
+  gap: 0;
+  min-width: max-content;
+}
+
+.admin-cal-timegrid {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  overflow-x: auto;
+}
+
+.admin-cal-gutter {
+  position: relative;
+  border-right: 1px solid rgb(var(--border));
+  background: color-mix(in srgb, rgb(var(--bg)) 95%, transparent);
+}
+
+.admin-cal-gutter-label {
+  position: absolute;
+  right: 8px;
+  font-size: 0.68rem;
+  color: rgb(var(--muted));
+  line-height: 1;
+  transform: translateY(-50%);
+}
+
+.admin-cal-day {
+  border-right: 1px solid rgb(var(--border));
+  border-bottom: 1px solid rgb(var(--border));
+  min-width: 180px;
+  background: color-mix(in srgb, rgb(var(--card)) 55%, transparent);
+}
+
+.admin-cal-day-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.8rem 0.9rem;
+  border-bottom: 1px solid rgb(var(--border));
+  background: color-mix(in srgb, rgb(var(--bg)) 90%, transparent);
+  backdrop-filter: blur(4px);
+}
+
+.admin-cal-day-week {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgb(var(--muted));
+}
+
+.admin-cal-day-date {
+  margin-top: 0.2rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.admin-cal-events {
+  padding: 0.6rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.admin-cal-day-body {
+  position: relative;
+}
+
+.admin-cal-slot {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 34.5px;
+  border-top: 1px solid color-mix(in srgb, rgb(var(--border)) 68%, transparent);
+  background: transparent;
+}
+
+.admin-cal-slot:hover {
+  background: color-mix(in srgb, rgb(var(--brand)) 8%, transparent);
+}
+
+.admin-cal-event {
+  border-radius: 0.8rem;
+  border: 1px solid rgb(var(--border));
+  background: rgb(var(--bg));
+  padding: 0.55rem;
+  box-shadow: 0 8px 24px -20px rgba(15, 23, 42, 0.65);
+}
+
+.admin-cal-event-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.admin-cal-time {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgb(var(--muted));
+}
+
+.admin-cal-student {
+  margin-top: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.admin-cal-charge {
+  margin-top: 0.15rem;
+  font-size: 0.75rem;
+  color: rgb(var(--muted));
+}
+
+.admin-cal-empty {
+  padding: 1rem;
+  font-size: 0.8rem;
+  color: rgb(var(--muted));
+}
+
+.admin-cal-event-block {
+  position: absolute;
+  min-width: 0;
+  right: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  border-radius: 0.55rem;
+  border: 1px solid;
+  padding: 0.28rem 0.36rem;
+  overflow: hidden;
+  text-align: left;
+  z-index: 2;
+}
+
+.admin-cal-event-active {
+  box-shadow: 0 0 0 2px rgb(var(--brand));
+}
+
+.admin-cal-event-time {
+  font-size: 0.66rem;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.admin-cal-event-student {
+  margin-top: 0.12rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.admin-cal-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(2, 6, 23, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.admin-cal-modal {
+  width: min(620px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
 }
 

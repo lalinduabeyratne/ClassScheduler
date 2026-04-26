@@ -133,6 +133,8 @@ export default function AdminStudentsPage() {
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
   const [selectedStudentId, setSelectedStudentId] = useState("");
+  const [mobilePanel, setMobilePanel] = useState<"students" | "edit">("students");
+  const [studentSearch, setStudentSearch] = useState("");
 
   const [fullName, setFullName] = useState("");
   const [parentName, setParentName] = useState("");
@@ -157,6 +159,7 @@ export default function AdminStudentsPage() {
   useEffect(() => {
     if (loading) return;
     if (!user) {
+      setCheckingRole(false);
       router.replace("/login");
       return;
     }
@@ -210,6 +213,15 @@ export default function AdminStudentsPage() {
       })),
     [rawStudents],
   );
+
+  const filteredStudents = useMemo(() => {
+    const q = studentSearch.trim().toLowerCase();
+    if (!q) return students;
+    return students.filter((s) => {
+      const hay = `${s.fullName} ${s.email} ${s.contactNumber}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [studentSearch, students]);
 
   const slots: SlotDoc[] = useMemo(
     () =>
@@ -735,68 +747,217 @@ export default function AdminStudentsPage() {
       ) : null}
 
       <div className="card p-6">
-        <div className="font-semibold">Add student</div>
-        <form className="mt-4 grid gap-3 md:grid-cols-3" onSubmit={onCreateStudent}>
-          <div className="space-y-1">
-            <div className="label">Full name</div>
-            <input className="input" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="font-semibold">Add student</div>
+            <p className="mt-1 text-xs text-[rgb(var(--muted))]">
+              Create profile, login, and optional timetable assignment in one step.
+            </p>
           </div>
-          <div className="space-y-1">
-            <div className="label">Parent name (optional)</div>
-            <input className="input" value={parentName} onChange={(e) => setParentName(e.target.value)} />
+          <div className="rounded-lg border border-[rgb(var(--border))] bg-black/5 px-3 py-2 text-xs dark:bg-white/5">
+            Selected slots: <span className="font-semibold">{assignedSlotIds.length}</span>
           </div>
-          <div className="space-y-1">
-            <div className="label">Contact number</div>
-            <input className="input" value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <div className="label">Email (login)</div>
-            <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          </div>
-          <div className="space-y-1">
-            <div className="label">Fee per session (LKR)</div>
-            <input className="input" value={feeLkr} onChange={(e) => setFeeLkr(e.target.value)} placeholder="5000" inputMode="decimal" required />
-          </div>
-          <div className="space-y-1">
-            <div className="label">Session duration (min)</div>
-            <input className="input" value={sessionDurationMin} onChange={(e) => setSessionDurationMin(e.target.value)} inputMode="numeric" required />
-          </div>
+        </div>
 
-          <div className="space-y-1 md:col-span-3">
-            <div className="label">Assign schedule slots</div>
-            <div className="max-h-48 space-y-1 overflow-auto rounded-lg border border-[rgb(var(--border))] p-2">
-              {slots.map((slot) => (
-                <label key={slot.id} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={assignedSlotIds.includes(slot.id)}
-                    onChange={(e) => {
-                      setAssignedSlotIds((prev) =>
-                        e.target.checked ? [...prev, slot.id] : prev.filter((x) => x !== slot.id),
-                      );
-                    }}
-                  />
-                  <span>
-                    {slot.dayLabel} {slot.startTime}-{slot.endTime}
+        <form className="mt-4 grid gap-4 xl:grid-cols-[1fr_340px]" onSubmit={onCreateStudent}>
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-1">
+                <div className="label">Full name</div>
+                <input
+                  className="input"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Student full name"
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="label">Parent name (optional)</div>
+                <input
+                  className="input"
+                  value={parentName}
+                  onChange={(e) => setParentName(e.target.value)}
+                  placeholder="Parent/guardian name"
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="label">Contact number</div>
+                <input
+                  className="input"
+                  value={contactNumber}
+                  onChange={(e) => setContactNumber(e.target.value)}
+                  placeholder="+94..."
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="label">Email (login)</div>
+                <input
+                  className="input"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="student@email.com"
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="label">Fee per session (LKR)</div>
+                <input
+                  className="input"
+                  value={feeLkr}
+                  onChange={(e) => setFeeLkr(e.target.value)}
+                  placeholder="5000"
+                  inputMode="decimal"
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="label">Session duration (minutes)</div>
+                <input
+                  className="input"
+                  value={sessionDurationMin}
+                  onChange={(e) => setSessionDurationMin(e.target.value)}
+                  placeholder="180"
+                  inputMode="numeric"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="label">Assign schedule slots</div>
+              <details className="group rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--bg))]">
+                <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-sm">
+                  <span className="text-[rgb(var(--muted))]">
+                    {assignedSlotIds.length > 0
+                      ? `${assignedSlotIds.length} slot(s) selected`
+                      : "Select one or more slots"}
                   </span>
-                </label>
-              ))}
+                  <span className="text-xs text-[rgb(var(--muted))] transition group-open:rotate-180">
+                    ▼
+                  </span>
+                </summary>
+                <div className="max-h-56 space-y-1 overflow-auto border-t border-[rgb(var(--border))] p-2">
+                  {slots.map((slot) => (
+                    <label
+                      key={slot.id}
+                      className="flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                      <span>
+                        {slot.dayLabel} {slot.startTime}-{slot.endTime}
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={assignedSlotIds.includes(slot.id)}
+                        onChange={(e) => {
+                          setAssignedSlotIds((prev) =>
+                            e.target.checked ? [...prev, slot.id] : prev.filter((x) => x !== slot.id),
+                          );
+                        }}
+                      />
+                    </label>
+                  ))}
+                  {slots.length === 0 ? (
+                    <div className="px-2 py-1 text-xs text-[rgb(var(--muted))]">No schedule slots found.</div>
+                  ) : null}
+                </div>
+              </details>
+              {assignedSlotIds.length > 0 ? (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {assignedSlotIds
+                    .map((id) => slots.find((slot) => slot.id === id))
+                    .filter((slot): slot is SlotDoc => Boolean(slot))
+                    .map((slot) => (
+                      <span
+                        key={slot.id}
+                        className="inline-flex items-center gap-1 rounded-full border border-[rgb(var(--border))] px-2 py-0.5 text-xs"
+                      >
+                        {slot.dayLabel} {slot.startTime}
+                        <button
+                          type="button"
+                          className="text-[rgb(var(--muted))] hover:text-red-300"
+                          onClick={() =>
+                            setAssignedSlotIds((prev) => prev.filter((x) => x !== slot.id))
+                          }
+                          aria-label={`Remove ${slot.dayLabel} ${slot.startTime}`}
+                        >
+                          x
+                        </button>
+                      </span>
+                    ))}
+                </div>
+              ) : null}
             </div>
           </div>
 
-          <div className="md:col-span-3 flex justify-end">
-            <button className="btn btn-primary" disabled={creating}>
+          <div className="card p-4">
+            <div className="text-sm font-semibold">Quick summary</div>
+            <div className="mt-3 space-y-2 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-[rgb(var(--muted))]">Name</span>
+                <span className="max-w-[180px] truncate font-medium">{fullName || "-"}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[rgb(var(--muted))]">Email</span>
+                <span className="max-w-[180px] truncate font-medium">{email || "-"}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[rgb(var(--muted))]">Fee/session</span>
+                <span className="font-medium">
+                  {Number.isFinite(Number(feeLkr)) && Number(feeLkr) > 0
+                    ? formatMoneyLKR(Math.round(Number(feeLkr) * 100))
+                    : "-"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[rgb(var(--muted))]">Duration</span>
+                <span className="font-medium">{sessionDurationMin || "-"} min</span>
+              </div>
+              <div className="flex items-center justify-between border-t border-[rgb(var(--border))] pt-2">
+                <span className="text-[rgb(var(--muted))]">Assigned slots</span>
+                <span className="font-semibold">{assignedSlotIds.length}</span>
+              </div>
+            </div>
+            <button className="btn btn-primary mt-4 w-full" disabled={creating}>
               {creating ? "Creating..." : "Create student + login"}
             </button>
           </div>
         </form>
       </div>
 
+      <div className="grid grid-cols-2 gap-2 md:hidden">
+        <button
+          className={`btn ${mobilePanel === "students" ? "btn-primary" : "btn-ghost"}`}
+          onClick={() => setMobilePanel("students")}
+          type="button"
+        >
+          Students
+        </button>
+        <button
+          className={`btn ${mobilePanel === "edit" ? "btn-primary" : "btn-ghost"}`}
+          onClick={() => setMobilePanel("edit")}
+          type="button"
+          disabled={!selectedStudent}
+        >
+          Edit
+        </button>
+      </div>
+
       <div className="grid gap-6 md:grid-cols-2">
-        <div className="card p-6">
+        <div className={`card order-2 p-6 md:order-1 ${mobilePanel === "students" ? "" : "hidden md:block"}`}>
           <div className="font-semibold">Students</div>
-          <div className="mt-3 space-y-2">
-            {students.map((s) => (
+          <div className="mt-3 space-y-1">
+            <div className="label">Search</div>
+            <input
+              className="input"
+              value={studentSearch}
+              onChange={(e) => setStudentSearch(e.target.value)}
+              placeholder="Search by name, email, or contact"
+            />
+          </div>
+          <div className="mt-3 max-h-72 space-y-2 overflow-auto md:max-h-none">
+            {filteredStudents.map((s) => (
               <button
                 key={s.id}
                 className={`w-full rounded-lg border p-3 text-left ${
@@ -804,7 +965,10 @@ export default function AdminStudentsPage() {
                     ? "border-[rgb(var(--brand))]"
                     : "border-[rgb(var(--border))]"
                 }`}
-                onClick={() => setSelectedStudentId(s.id)}
+                onClick={() => {
+                  setSelectedStudentId(s.id);
+                  setMobilePanel("edit");
+                }}
               >
                 <div className="flex items-center justify-between">
                   <div className="font-medium">{s.fullName}</div>
@@ -815,66 +979,141 @@ export default function AdminStudentsPage() {
                 <div className="text-xs text-[rgb(var(--muted))]">{s.email || "No email"}</div>
               </button>
             ))}
-            {students.length === 0 ? (
+            {filteredStudents.length === 0 ? (
               <div className="text-sm text-[rgb(var(--muted))]">No students yet.</div>
             ) : null}
           </div>
         </div>
 
-        <div className="card p-6">
+        <div className={`card order-1 p-6 md:order-2 ${mobilePanel === "edit" ? "" : "hidden md:block"}`}>
+          <div className="mb-3 md:hidden">
+            <button
+              className="btn btn-ghost"
+              type="button"
+              onClick={() => setMobilePanel("students")}
+            >
+              Back to students
+            </button>
+          </div>
           <div className="font-semibold">Edit selected student</div>
           {!selectedStudent ? (
             <div className="mt-3 text-sm text-[rgb(var(--muted))]">Select a student to edit profile and schedule.</div>
           ) : (
-            <div className="mt-4 space-y-3">
-              <input className="input" value={editFullName} onChange={(e) => setEditFullName(e.target.value)} placeholder="Full name" />
-              <input className="input" value={editParentName} onChange={(e) => setEditParentName(e.target.value)} placeholder="Parent name" />
-              <input className="input" value={editContactNumber} onChange={(e) => setEditContactNumber(e.target.value)} placeholder="Contact number" />
-              <input className="input" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} placeholder="Email" />
-              <div className="grid grid-cols-2 gap-2">
-                <input className="input" value={editFeeLkr} onChange={(e) => setEditFeeLkr(e.target.value)} placeholder="5000" inputMode="decimal" />
-                <input className="input" value={editSessionDuration} onChange={(e) => setEditSessionDuration(e.target.value)} placeholder="Duration min" inputMode="numeric" />
+            <div className="mt-4 space-y-4">
+              <div className="rounded-lg border border-[rgb(var(--border))] bg-black/5 p-3 text-xs dark:bg-white/5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    Editing <span className="font-semibold">{selectedStudent.fullName}</span>
+                  </div>
+                  <div className={`rounded-full px-2 py-0.5 ${selectedStudent.active ? "bg-emerald-500/15 text-emerald-300" : "bg-rose-500/15 text-rose-300"}`}>
+                    {selectedStudent.active ? "Active" : "Inactive"}
+                  </div>
+                </div>
               </div>
-              <div className="max-h-48 space-y-1 overflow-auto rounded-lg border border-[rgb(var(--border))] p-2">
-                {slots.map((slot) => (
-                  <label key={slot.id} className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={editAssignedSlotIds.includes(slot.id)}
-                      onChange={(e) => {
-                        setEditAssignedSlotIds((prev) =>
-                          e.target.checked ? [...prev, slot.id] : prev.filter((x) => x !== slot.id),
-                        );
-                      }}
-                    />
-                    <span>
-                      {slot.dayLabel} {slot.startTime}-{slot.endTime}
+
+              <div className="space-y-3 rounded-lg border border-[rgb(var(--border))] p-4">
+                <div className="text-sm font-semibold">Profile details</div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-1">
+                    <div className="label">Full name</div>
+                    <input className="input" value={editFullName} onChange={(e) => setEditFullName(e.target.value)} placeholder="Full name" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="label">Parent name</div>
+                    <input className="input" value={editParentName} onChange={(e) => setEditParentName(e.target.value)} placeholder="Parent name" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="label">Contact number</div>
+                    <input className="input" value={editContactNumber} onChange={(e) => setEditContactNumber(e.target.value)} placeholder="Contact number" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="label">Email</div>
+                    <input className="input" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} placeholder="Email" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-lg border border-[rgb(var(--border))] p-4">
+                <div className="text-sm font-semibold">Billing setup</div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-1">
+                    <div className="label">Fee per session (LKR)</div>
+                    <input className="input" value={editFeeLkr} onChange={(e) => setEditFeeLkr(e.target.value)} placeholder="5000" inputMode="decimal" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="label">Session duration (minutes)</div>
+                    <input className="input" value={editSessionDuration} onChange={(e) => setEditSessionDuration(e.target.value)} placeholder="Duration min" inputMode="numeric" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-lg border border-[rgb(var(--border))] p-4">
+                <div className="flex items-center justify-between gap-2 text-sm font-semibold">
+                  <span>Assigned schedule slots</span>
+                  <span className="text-xs text-[rgb(var(--muted))]">{editAssignedSlotIds.length} selected</span>
+                </div>
+                <details className="group rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--bg))]">
+                  <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-sm">
+                    <span className="text-[rgb(var(--muted))]">
+                      {editAssignedSlotIds.length > 0
+                        ? `${editAssignedSlotIds.length} slot(s) selected`
+                        : "Select one or more slots"}
                     </span>
-                  </label>
-                ))}
+                    <span className="text-xs text-[rgb(var(--muted))] transition group-open:rotate-180">
+                      ▼
+                    </span>
+                  </summary>
+                  <div className="max-h-52 space-y-1 overflow-auto border-t border-[rgb(var(--border))] p-2">
+                    {slots.map((slot) => (
+                      <label key={slot.id} className="flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm hover:bg-black/5 dark:hover:bg-white/5">
+                        <span>
+                          {slot.dayLabel} {slot.startTime}-{slot.endTime}
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={editAssignedSlotIds.includes(slot.id)}
+                          onChange={(e) => {
+                            setEditAssignedSlotIds((prev) =>
+                              e.target.checked ? [...prev, slot.id] : prev.filter((x) => x !== slot.id),
+                            );
+                          }}
+                        />
+                      </label>
+                    ))}
+                    {slots.length === 0 ? (
+                      <div className="px-2 py-1 text-xs text-[rgb(var(--muted))]">No schedule slots found.</div>
+                    ) : null}
+                  </div>
+                </details>
               </div>
-              <div className="flex flex-wrap items-end justify-end gap-2">
-                <label className="flex flex-col gap-1 text-xs text-[rgb(var(--muted))]">
-                  Report month
-                  <input
-                    type="month"
-                    className="input w-40"
-                    value={reportMonth}
-                    onChange={(e) => setReportMonth(e.target.value)}
-                  />
-                </label>
-                <button className="btn btn-primary" onClick={onSaveStudent} disabled={saving}>
-                  Save
-                </button>
-                <button className="btn btn-primary" onClick={exportStudentReport} disabled={saving}>
-                  Export Monthly Report
-                </button>
-                <button className="btn btn-ghost" onClick={onDeactivateStudent} disabled={saving}>
-                  Deactivate
-                </button>
-                <button className="btn btn-ghost" onClick={onDeleteStudentRecord} disabled={saving}>
-                  Delete record
-                </button>
+
+              <div className="space-y-2 rounded-lg border border-[rgb(var(--border))] p-4">
+                <div className="text-sm font-semibold">Actions</div>
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <label className="flex w-full flex-col gap-1 text-xs text-[rgb(var(--muted))] sm:w-auto">
+                    Report month
+                    <input
+                      type="month"
+                      className="input w-full sm:w-44"
+                      value={reportMonth}
+                      onChange={(e) => setReportMonth(e.target.value)}
+                    />
+                  </label>
+                  <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+                    <button className="btn btn-primary w-full sm:w-auto" onClick={onSaveStudent} disabled={saving}>
+                      Save changes
+                    </button>
+                    <button className="btn btn-primary w-full sm:w-auto" onClick={exportStudentReport} disabled={saving}>
+                      Export Monthly Report
+                    </button>
+                    <button className="btn btn-ghost w-full sm:w-auto" onClick={onDeactivateStudent} disabled={saving}>
+                      Deactivate
+                    </button>
+                    <button className="btn btn-ghost w-full sm:w-auto" onClick={onDeleteStudentRecord} disabled={saving}>
+                      Delete record
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           )}
