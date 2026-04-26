@@ -37,6 +37,16 @@ function formatDateTimeCompact(ms: number) {
   }).format(new Date(ms));
 }
 
+function toDateTimeLocalValue(ms: number) {
+  const d = new Date(ms);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${y}-${m}-${day}T${hh}:${mm}`;
+}
+
 const MISSED_STATUSES = new Set<Session["status"]>(["early_cancel", "late_cancel", "no_show"]);
 const TUTOR_CANCELED_STATUS: Session["status"] = "tutor_cancel";
 
@@ -404,6 +414,7 @@ export default function StudentPage() {
     () => reschedulableSessions.find((s) => s.id === rescheduleSessionId) ?? null,
     [rescheduleSessionId, reschedulableSessions],
   );
+  const rescheduleMinDateTime = useMemo(() => toDateTimeLocalValue(Date.now()), [rescheduleNewStart]);
 
   async function openPaymentSlip(payment: Payment) {
     setHistoryError(null);
@@ -732,7 +743,7 @@ export default function StudentPage() {
                 className="input"
                 value={payAmountLkr}
                 onChange={(e) => setPayAmountLkr(e.target.value)}
-                placeholder="2500"
+                placeholder="5000"
                 inputMode="decimal"
                 required
                 aria-required="true"
@@ -1052,6 +1063,7 @@ export default function StudentPage() {
                 type="datetime-local"
                 value={rescheduleNewStart}
                 onChange={(e) => setRescheduleNewStart(e.target.value)}
+                min={rescheduleMinDateTime}
               />
               <div className={`text-xs ${rescheduleTimeError ? "text-rose-300" : "text-[rgb(var(--muted))]"}`}>
                 {rescheduleTimeError ?? "Choose a future date and time."}
