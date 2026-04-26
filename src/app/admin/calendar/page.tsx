@@ -279,6 +279,7 @@ export default function AdminCalendarPage() {
               <option value="all">All</option>
               <option value="scheduled">Scheduled</option>
               <option value="attended">Attended</option>
+              <option value="tutor_cancel">Tutor cancel</option>
               <option value="early_cancel">Early cancel</option>
               <option value="late_cancel">Late cancel</option>
               <option value="no_show">No show</option>
@@ -378,6 +379,7 @@ export default function AdminCalendarPage() {
                           }
                         >
                           <option value="attended">Attended</option>
+                          <option value="tutor_cancel">Tutor cancel</option>
                           <option value="early_cancel">Early cancel</option>
                           <option value="late_cancel">Late cancel</option>
                           <option value="no_show">No show</option>

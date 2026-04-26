@@ -15,7 +15,7 @@ import {
 } from "@/lib/firestore/api";
 import { useFirestoreQuery } from "@/lib/firestore/hooks";
 import { col } from "@/lib/firestore/paths";
-import { computeStudentBalance } from "@/lib/billing/rollup";
+import { allocateVerifiedPaymentsOldestFirst, computeStudentBalance } from "@/lib/billing/rollup";
 import type { Payment, Session, Student } from "@/lib/model/types";
 import { createPaymentWithSlip, replacePaymentSlip } from "@/lib/payments/createPaymentWithSlip";
 import { createRescheduleRequest } from "@/lib/reschedule/createRequest";
@@ -36,6 +36,9 @@ function formatDateTimeCompact(ms: number) {
     timeStyle: "short",
   }).format(new Date(ms));
 }
+
+const MISSED_STATUSES = new Set<Session["status"]>(["early_cancel", "late_cancel", "no_show"]);
+const TUTOR_CANCELED_STATUS: Session["status"] = "tutor_cancel";
 
 function extractStoragePathFromSlipUrl(slipUrl: string): string | null {
   try {
@@ -253,6 +256,10 @@ export default function StudentPage() {
     [payments, sessions],
   );
   const duePaymentCents = Math.max(0, balance.remainingCents);
+  const paymentCoverage = useMemo(
+    () => allocateVerifiedPaymentsOldestFirst({ sessions, payments }),
+    [payments, sessions],
+  );
   const pendingPaymentCents = useMemo(
     () =>
       payments
@@ -269,6 +276,80 @@ export default function StudentPage() {
       .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0))
       .slice(0, 10);
   }, [sessions]);
+
+  const sessionsPrepaidCoverage = useMemo(() => {
+    const scheduledUpcoming = upcomingSessions.filter(
+      (session) => session.status === "scheduled" && Math.max(0, Number(session.feePerSessionCents ?? 0)) > 0,
+    );
+
+    let remainingCredit = paymentCoverage.remainingCreditCents;
+    const coveredIds = new Set<string>(paymentCoverage.fullyPaidSessionIds);
+
+    // Mark additional sessions covered by remaining credit
+    for (const session of scheduledUpcoming) {
+      if (coveredIds.has(session.id)) continue;
+      const chargeCents = Math.max(0, Number(session.feePerSessionCents ?? 0));
+      if (remainingCredit >= chargeCents) {
+        coveredIds.add(session.id);
+        remainingCredit -= chargeCents;
+      }
+    }
+
+    return coveredIds;
+  }, [paymentCoverage, upcomingSessions]);
+
+  const prepaidUpcomingSummary = useMemo(() => {
+    const scheduledUpcoming = upcomingSessions.filter(
+      (session) => session.status === "scheduled" && Math.max(0, Number(session.feePerSessionCents ?? 0)) > 0,
+    );
+    const fullyPaidUpcoming = scheduledUpcoming.filter((session) =>
+      sessionsPrepaidCoverage.has(session.id),
+    );
+
+    return {
+      paidCount: fullyPaidUpcoming.length,
+      paidCents: fullyPaidUpcoming.reduce((sum, session) => sum + Math.max(0, Number(session.feePerSessionCents ?? 0)), 0),
+    };
+  }, [sessionsPrepaidCoverage, upcomingSessions]);
+
+  const missedSessions = useMemo(() => {
+    const nowMs = Date.now();
+    return sessions
+      .filter((s) => MISSED_STATUSES.has(s.status) && (s.startAt ?? 0) <= nowMs)
+      .sort((a, b) => (b.startAt ?? 0) - (a.startAt ?? 0));
+  }, [sessions]);
+
+  const tutorCanceledSessions = useMemo(() => {
+    const nowMs = Date.now();
+    return sessions
+      .filter((s) => s.status === TUTOR_CANCELED_STATUS && (s.startAt ?? 0) <= nowMs)
+      .sort((a, b) => (b.startAt ?? 0) - (a.startAt ?? 0));
+  }, [sessions]);
+
+  const missedSummary = useMemo(() => {
+    const earlyCancelCount = missedSessions.filter((s) => s.status === "early_cancel").length;
+    const lateCancelCount = missedSessions.filter((s) => s.status === "late_cancel").length;
+    const noShowCount = missedSessions.filter((s) => s.status === "no_show").length;
+
+    return {
+      totalMissed: missedSessions.length,
+      tutorCanceledCount: tutorCanceledSessions.length,
+      totalToCatchUp: missedSessions.length + tutorCanceledSessions.length,
+      earlyCancelCount,
+      lateCancelCount,
+      noShowCount,
+    };
+  }, [missedSessions, tutorCanceledSessions]);
+
+  const reschedulableSessions = useMemo(() => {
+    const seen = new Set<string>();
+    const merged = [...missedSessions.slice(0, 20), ...tutorCanceledSessions.slice(0, 20), ...upcomingSessions];
+    return merged.filter((session) => {
+      if (seen.has(session.id)) return false;
+      seen.add(session.id);
+      return true;
+    });
+  }, [missedSessions, tutorCanceledSessions, upcomingSessions]);
 
   const paymentHistory = useMemo(() => {
     return [...payments].sort((a, b) => b.paidAt - a.paidAt).slice(0, 30);
@@ -320,8 +401,8 @@ export default function StudentPage() {
   const canSubmitPayment = Boolean(studentId && payFile && !payAmountError && !paySubmitting);
 
   const selectedRescheduleSession = useMemo(
-    () => upcomingSessions.find((s) => s.id === rescheduleSessionId) ?? null,
-    [rescheduleSessionId, upcomingSessions],
+    () => reschedulableSessions.find((s) => s.id === rescheduleSessionId) ?? null,
+    [rescheduleSessionId, reschedulableSessions],
   );
 
   async function openPaymentSlip(payment: Payment) {
@@ -434,7 +515,7 @@ export default function StudentPage() {
                 ? "This is the amount still due based on verified payments and attendance charges."
                 : "No payment is due right now."}
             </div>
-            <div className="mt-3 grid gap-2 text-sm md:grid-cols-2">
+            <div className="mt-3 grid gap-2 text-sm md:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-lg border border-[rgb(var(--border))] bg-black/5 px-3 py-2 dark:bg-white/5">
                 <div className="text-xs text-[rgb(var(--muted))]">Pending verification</div>
                 <div className="font-semibold">{formatMoneyLKR(pendingPaymentCents)}</div>
@@ -442,6 +523,17 @@ export default function StudentPage() {
               <div className="rounded-lg border border-[rgb(var(--border))] bg-black/5 px-3 py-2 dark:bg-white/5">
                 <div className="text-xs text-[rgb(var(--muted))]">Projected due after pending</div>
                 <div className="font-semibold">{formatMoneyLKR(projectedDueAfterPendingCents)}</div>
+              </div>
+              <div className="rounded-lg border border-[rgb(var(--border))] bg-emerald-500/10 px-3 py-2">
+                <div className="text-xs text-[rgb(var(--muted))]">Prepaid for upcoming</div>
+                <div className="font-semibold">{formatMoneyLKR(prepaidUpcomingSummary.paidCents)}</div>
+                <div className="text-[11px] text-[rgb(var(--muted))]">
+                  {prepaidUpcomingSummary.paidCount} scheduled classes already covered
+                </div>
+              </div>
+              <div className="rounded-lg border border-[rgb(var(--border))] bg-indigo-500/10 px-3 py-2">
+                <div className="text-xs text-[rgb(var(--muted))]">Advance balance</div>
+                <div className="font-semibold">{formatMoneyLKR(paymentCoverage.remainingCreditCents)}</div>
               </div>
             </div>
           </div>
@@ -476,6 +568,35 @@ export default function StudentPage() {
             </div>
           </div>
         )}
+      </div>
+
+      <div className="card border-amber-500/40 bg-amber-500/10 p-6">
+        <div className="font-semibold text-amber-200">Classes to catch up</div>
+        <div className="mt-1 text-xs text-rose-100/80">
+          Missed or canceled classes can slow progress. Request make-up classes to stay on track.
+        </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-4">
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+            <div className="text-xs text-amber-100/80">Total to catch up</div>
+            <div className="text-xl font-semibold text-amber-100">{missedSummary.totalToCatchUp}</div>
+          </div>
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+            <div className="text-xs text-amber-100/80">You canceled early</div>
+            <div className="text-xl font-semibold text-amber-100">{missedSummary.earlyCancelCount}</div>
+          </div>
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+            <div className="text-xs text-amber-100/80">You canceled late</div>
+            <div className="text-xl font-semibold text-amber-100">{missedSummary.lateCancelCount}</div>
+          </div>
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+            <div className="text-xs text-amber-100/80">No show</div>
+            <div className="text-xl font-semibold text-amber-100">{missedSummary.noShowCount}</div>
+          </div>
+          <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 p-3">
+            <div className="text-xs text-indigo-100/80">Tutor canceled</div>
+            <div className="text-xl font-semibold text-indigo-100">{missedSummary.tutorCanceledCount}</div>
+          </div>
+        </div>
       </div>
 
       <div className="card p-6">
@@ -528,16 +649,25 @@ export default function StudentPage() {
                 </div>
               ) : (
                 <ul className="space-y-2 text-sm">
-                  {upcomingSessions.slice(0, 3).map((s) => (
-                    <li key={s.id} className="flex items-center justify-between gap-3">
-                      <div className="font-medium">
-                        {formatDateTimeCompact(s.startAt)}
-                      </div>
-                      <div className="text-xs text-[rgb(var(--muted))]">
-                        {s.status.replaceAll("_", " ")}
-                      </div>
-                    </li>
-                  ))}
+                  {upcomingSessions.slice(0, 3).map((s) => {
+                    const isScheduledPaid =
+                      s.status === "scheduled" &&
+                      sessionsPrepaidCoverage.has(s.id) &&
+                      Math.max(0, Number(s.feePerSessionCents ?? 0)) > 0;
+                    return (
+                      <li key={s.id} className="flex items-center justify-between gap-3">
+                        <div className="font-medium">{formatDateTimeCompact(s.startAt)}</div>
+                        <div className="flex items-center gap-2 text-xs text-[rgb(var(--muted))]">
+                          <span>{s.status.replaceAll("_", " ")}</span>
+                          {isScheduledPaid ? (
+                            <span className="rounded-full border border-emerald-400/60 bg-emerald-500/15 px-2 py-0.5 text-emerald-200">
+                              Already paid
+                            </span>
+                          ) : null}
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>
@@ -833,7 +963,7 @@ export default function StudentPage() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="font-semibold">Request a reschedule</div>
           <div className="text-xs text-[rgb(var(--muted))]">
-            The tutor must approve before it updates your schedule.
+            Canceled and missed sessions are marked clearly. Use this to request a make-up class.
           </div>
         </div>
 
@@ -892,15 +1022,25 @@ export default function StudentPage() {
                 onChange={(e) => setRescheduleSessionId(e.target.value)}
               >
                 <option value="">Select…</option>
+                {tutorCanceledSessions.slice(0, 20).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {formatDateTimeCompact(s.startAt)} (TUTOR CANCELED)
+                  </option>
+                ))}
+                {missedSessions.slice(0, 20).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {formatDateTimeCompact(s.startAt)} (MISSED - {s.status.replaceAll("_", " ")})
+                  </option>
+                ))}
                 {upcomingSessions.map((s) => (
                   <option key={s.id} value={s.id}>
                     {formatDateTimeCompact(s.startAt)} (current)
                   </option>
                 ))}
               </select>
-              {upcomingSessions.length === 0 ? (
+              {reschedulableSessions.length === 0 ? (
                 <div className="pt-1 text-xs text-[rgb(var(--muted))]">
-                  No upcoming sessions found yet. (The tutor generates sessions from the weekly timetable.)
+                  No eligible sessions found yet.
                 </div>
               ) : null}
             </div>

@@ -61,11 +61,16 @@ function extractStoragePathFromSlipUrl(slipUrl: string): string | null {
   }
 }
 
-function statusButtonClass(active: boolean, kind: "attended" | "early_cancel" | "late_cancel" | "no_show") {
+function statusButtonClass(active: boolean, kind: "attended" | "tutor_cancel" | "early_cancel" | "late_cancel" | "no_show") {
   if (kind === "attended") {
     return active
       ? "bg-emerald-600 text-white border-emerald-600"
       : "border-emerald-400 text-emerald-700 dark:text-emerald-300";
+  }
+  if (kind === "tutor_cancel") {
+    return active
+      ? "bg-indigo-600 text-white border-indigo-600"
+      : "border-indigo-400 text-indigo-700 dark:text-indigo-300";
   }
   if (kind === "early_cancel") {
     return active
@@ -584,7 +589,7 @@ export default function AdminPage() {
       <div className="card p-6">
         <div className="font-semibold">Today sessions: one-click attendance</div>
         <div className="mt-2 text-xs text-[rgb(var(--muted))]">
-          Marking status updates financial charge instantly: attended = 100%, early cancel = 0%, late cancel = 50%, no show = 100%.
+          Marking status updates financial charge instantly: attended = 100%, tutor cancel = 0%, early cancel = 0%, late cancel = 50%, no show = 100%.
         </div>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-sm">
@@ -611,6 +616,12 @@ export default function AdminPage() {
                         onClick={() => void markSessionStatus(s, "attended")}
                       >
                         Attended
+                      </button>
+                      <button
+                        className={`btn ${statusButtonClass(s.status === "tutor_cancel", "tutor_cancel")}`}
+                        onClick={() => void markSessionStatus(s, "tutor_cancel")}
+                      >
+                        Tutor cancel
                       </button>
                       <button
                         className={`btn ${statusButtonClass(s.status === "early_cancel", "early_cancel")}`}

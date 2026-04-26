@@ -43,6 +43,11 @@ function statusClass(active: boolean, status: AttendanceStatus) {
       ? "bg-emerald-600 border-emerald-600 text-white"
       : "border-emerald-400 text-emerald-700 dark:text-emerald-300";
   }
+  if (status === "tutor_cancel") {
+    return active
+      ? "bg-indigo-600 border-indigo-600 text-white"
+      : "border-indigo-400 text-indigo-700 dark:text-indigo-300";
+  }
   if (status === "late_cancel") {
     return active
       ? "bg-amber-500 border-amber-500 text-black"
@@ -411,6 +416,7 @@ export default function AdminSessionsHistoryPage() {
               onChange={(e) => setNewSessionStatus(e.target.value as AttendanceStatus)}
             >
               <option value="attended">attended</option>
+              <option value="tutor_cancel">tutor cancel</option>
               <option value="late_cancel">late cancel</option>
               <option value="early_cancel">early cancel</option>
               <option value="no_show">no show</option>
@@ -553,7 +559,7 @@ export default function AdminSessionsHistoryPage() {
                   </td>
                   <td className="py-2 pr-3">
                     <div className="flex flex-wrap gap-2">
-                      {(["attended", "late_cancel", "no_show", "early_cancel"] as AttendanceStatus[]).map(
+                      {(["attended", "tutor_cancel", "late_cancel", "no_show", "early_cancel"] as AttendanceStatus[]).map(
                         (status) => (
                           <button
                             key={status}

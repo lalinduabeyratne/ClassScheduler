@@ -17,7 +17,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AdminTopNav } from "@/app/admin/_components/AdminTopNav";
 import { computeChargeCents } from "@/lib/billing/fee";
-import { computeStudentBalance } from "@/lib/billing/rollup";
+import { allocateVerifiedPaymentsOldestFirst, computeStudentBalance } from "@/lib/billing/rollup";
 import { db, storage } from "@/lib/firebase/client";
 import { createAuthUserWithEmailPassword } from "@/lib/firebase/createAuthUser";
 import {
@@ -75,6 +75,7 @@ function formatMoneyLKR(cents: number) {
 
 function statusPillClass(status: string) {
   if (status === "attended") return "status-pill status-attended";
+  if (status === "tutor_cancel") return "status-pill status-tutor-cancel";
   if (status === "late_cancel") return "status-pill status-late-cancel";
   if (status === "no_show") return "status-pill status-no-show";
   return "status-pill status-early-cancel";
@@ -95,6 +96,8 @@ function combineDateTimeMs(d: Date, hhmm: string) {
   const [hh, mm] = hhmm.split(":").map((x) => Number(x));
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh || 0, mm || 0).getTime();
 }
+
+const MISSED_STATUSES = new Set<Session["status"]>(["early_cancel", "late_cancel", "no_show"]);
 
 function extractStoragePathFromSlipUrl(slipUrl: string): string | null {
   try {
@@ -259,12 +262,85 @@ export default function AdminStudentsPage() {
     [selectedPayments, selectedSessions],
   );
 
+  const selectedPaymentCoverage = useMemo(
+    () => allocateVerifiedPaymentsOldestFirst({ sessions: selectedSessions, payments: selectedPayments }),
+    [selectedPayments, selectedSessions],
+  );
+
+  const selectedSessionsPrepaidCoverage = useMemo(() => {
+    const scheduledUpcoming = selectedSessions
+      .filter(
+        (session) =>
+          session.status === "scheduled" &&
+          (session.startAt ?? 0) > Date.now() &&
+          Math.max(0, Number(session.feePerSessionCents ?? 0)) > 0,
+      )
+      .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0));
+
+    let remainingCredit = selectedPaymentCoverage.remainingCreditCents;
+    const coveredIds = new Set<string>(selectedPaymentCoverage.fullyPaidSessionIds);
+
+    // Mark additional sessions covered by remaining credit
+    for (const session of scheduledUpcoming) {
+      if (coveredIds.has(session.id)) continue;
+      const chargeCents = Math.max(0, Number(session.feePerSessionCents ?? 0));
+      if (remainingCredit >= chargeCents) {
+        coveredIds.add(session.id);
+        remainingCredit -= chargeCents;
+      }
+    }
+
+    return coveredIds;
+  }, [selectedPaymentCoverage, selectedSessions]);
+
+  const selectedUpcomingPrepaid = useMemo(() => {
+    const nowMs = Date.now();
+    const scheduledUpcoming = selectedSessions
+      .filter(
+        (session) =>
+          session.status === "scheduled" &&
+          (session.startAt ?? 0) > nowMs &&
+          Math.max(0, Number(session.feePerSessionCents ?? 0)) > 0,
+      )
+      .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0));
+
+    const fullyPaid = scheduledUpcoming.filter((session) =>
+      selectedSessionsPrepaidCoverage.has(session.id),
+    );
+
+    return {
+      paidCount: fullyPaid.length,
+      paidCents: fullyPaid.reduce((sum, session) => sum + Math.max(0, Number(session.feePerSessionCents ?? 0)), 0),
+    };
+  }, [selectedSessionsPrepaidCoverage, selectedSessions]);
+
   const selectedAttendance = useMemo(
     () => {
       return [...selectedSessions].sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0)).slice(0, 30);
     },
     [selectedSessions],
   );
+
+  const selectedMissedSummary = useMemo(() => {
+    const missedSessions = selectedSessions.filter((s) => MISSED_STATUSES.has(s.status));
+    const tutorCanceledCount = selectedSessions.filter((s) => s.status === "tutor_cancel").length;
+    const earlyCancelCount = missedSessions.filter((s) => s.status === "early_cancel").length;
+    const lateCancelCount = missedSessions.filter((s) => s.status === "late_cancel").length;
+    const noShowCount = missedSessions.filter((s) => s.status === "no_show").length;
+    const missedRevenueCents = missedSessions.reduce((sum, s) => {
+      const expected = Math.max(0, Number(s.feePerSessionCents ?? 0));
+      const charged = Math.max(0, Number(s.chargeCents ?? 0));
+      return sum + Math.max(0, expected - charged);
+    }, 0);
+    return {
+      totalMissed: missedSessions.length,
+      tutorCanceledCount,
+      earlyCancelCount,
+      lateCancelCount,
+      noShowCount,
+      missedRevenueCents,
+    };
+  }, [selectedSessions]);
 
   const rescheduleQuery = useMemo(
     () => (selectedStudentId ? qRescheduleForStudent(selectedStudentId) : null),
@@ -773,7 +849,7 @@ export default function AdminStudentsPage() {
           <div className="mt-2 text-sm text-[rgb(var(--muted))]">Select a student to view profile.</div>
         ) : (
           <div className="mt-4 space-y-5">
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
               <div className="rounded-lg border border-[rgb(var(--border))] p-3">
                 <div className="text-xs text-[rgb(var(--muted))]">Total charged</div>
                 <div className="text-lg font-semibold">{formatMoneyLKR(selectedBalance.totalChargedCents)}</div>
@@ -785,6 +861,49 @@ export default function AdminStudentsPage() {
               <div className="rounded-lg border border-[rgb(var(--border))] p-3">
                 <div className="text-xs text-[rgb(var(--muted))]">Remaining balance</div>
                 <div className="text-lg font-semibold">{formatMoneyLKR(selectedBalance.remainingCents)}</div>
+              </div>
+              <div className="rounded-lg border border-[rgb(var(--border))] bg-emerald-500/10 p-3">
+                <div className="text-xs text-[rgb(var(--muted))]">Prepaid for upcoming</div>
+                <div className="text-lg font-semibold">{formatMoneyLKR(selectedUpcomingPrepaid.paidCents)}</div>
+                <div className="text-[11px] text-[rgb(var(--muted))]">
+                  {selectedUpcomingPrepaid.paidCount} scheduled classes covered
+                </div>
+              </div>
+              <div className="rounded-lg border border-[rgb(var(--border))] bg-indigo-500/10 p-3">
+                <div className="text-xs text-[rgb(var(--muted))]">Advance balance</div>
+                <div className="text-lg font-semibold">
+                  {formatMoneyLKR(selectedPaymentCoverage.remainingCreditCents)}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-3">
+              <div className="text-sm font-semibold text-rose-200">Missed classes and missed revenue</div>
+              <div className="mt-2 grid gap-2 text-sm md:grid-cols-6">
+                <div>
+                  <div className="text-xs text-rose-100/80">Total missed</div>
+                  <div className="font-semibold text-rose-100">{selectedMissedSummary.totalMissed}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-indigo-100/80">Tutor canceled</div>
+                  <div className="font-semibold text-indigo-100">{selectedMissedSummary.tutorCanceledCount}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-rose-100/80">Early cancel</div>
+                  <div className="font-semibold text-rose-100">{selectedMissedSummary.earlyCancelCount}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-rose-100/80">Late cancel</div>
+                  <div className="font-semibold text-rose-100">{selectedMissedSummary.lateCancelCount}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-rose-100/80">No show</div>
+                  <div className="font-semibold text-rose-100">{selectedMissedSummary.noShowCount}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-rose-100/80">Missed revenue</div>
+                  <div className="font-semibold text-rose-100">{formatMoneyLKR(selectedMissedSummary.missedRevenueCents)}</div>
+                </div>
               </div>
             </div>
 
@@ -801,10 +920,20 @@ export default function AdminStudentsPage() {
                   </thead>
                   <tbody>
                     {selectedAttendance.map((s) => (
-                      <tr key={s.id} className="border-b border-[rgb(var(--border))]">
+                      <tr key={s.id} className={`border-b border-[rgb(var(--border))] ${MISSED_STATUSES.has(s.status) ? "bg-rose-500/10" : ""}`}>
                         <td className="py-2 pr-3">{new Date(s.startAt).toLocaleString()}</td>
                         <td className="py-2 pr-3">
-                          <span className={statusPillClass(s.status)}>{s.status.replaceAll("_", " ")}</span>
+                          <div className="flex items-center gap-2">
+                            <span className={statusPillClass(s.status)}>
+                              {s.status.replaceAll("_", " ")}
+                              {MISSED_STATUSES.has(s.status) ? " (MISSED)" : ""}
+                            </span>
+                            {s.status === "scheduled" &&
+                            selectedSessionsPrepaidCoverage.has(s.id) &&
+                            Math.max(0, Number(s.feePerSessionCents ?? 0)) > 0 ? (
+                              <span className="status-pill status-attended">already paid</span>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="py-2 pr-3 text-right">{formatMoneyLKR(s.chargeCents)}</td>
                       </tr>

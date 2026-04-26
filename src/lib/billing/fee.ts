@@ -10,6 +10,8 @@ export function computeChargeCents(args: {
       return 0;
     case "attended":
       return fee;
+    case "tutor_cancel":
+      return 0;
     case "early_cancel":
       return 0;
     case "late_cancel":

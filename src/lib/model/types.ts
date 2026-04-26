@@ -5,6 +5,7 @@ export type SessionType = "individual" | "group" | "online";
 export type AttendanceStatus =
   | "scheduled"
   | "attended"
+  | "tutor_cancel"
   | "early_cancel"
   | "late_cancel"
   | "no_show";
