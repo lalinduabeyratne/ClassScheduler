@@ -120,7 +120,6 @@ export default function AdminPage() {
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [openingSlipPaymentId, setOpeningSlipPaymentId] = useState<string | null>(null);
   const [showAllOutstanding, setShowAllOutstanding] = useState(false);
-  const [showAllFeeSetup, setShowAllFeeSetup] = useState(false);
   const [showAllTotals, setShowAllTotals] = useState(false);
   const [showAllMonthlySummary, setShowAllMonthlySummary] = useState(false);
 
@@ -275,11 +274,6 @@ export default function AdminPage() {
     [outstandingStudents, showAllOutstanding],
   );
 
-  const visibleFeeSetupStudents = useMemo(
-    () => (showAllFeeSetup ? students : students.slice(0, 12)),
-    [showAllFeeSetup, students],
-  );
-
   const visibleStudentSummaries = useMemo(
     () => (showAllTotals ? studentSummaries : studentSummaries.slice(0, 12)),
     [showAllTotals, studentSummaries],
@@ -306,6 +300,22 @@ export default function AdminPage() {
     return studentSummaries.find((s) => s.studentId === paymentStudentId)?.balanceCents ?? null;
   }, [paymentStudentId, studentSummaries]);
 
+  const paymentStudent = useMemo(
+    () => students.find((s) => s.id === paymentStudentId) ?? null,
+    [paymentStudentId, students],
+  );
+
+  const parsedPaymentAmountCents = useMemo(() => {
+    const amount = Math.round(Number(paymentAmountLkr) * 100);
+    if (!Number.isFinite(amount) || amount <= 0) return 0;
+    return amount;
+  }, [paymentAmountLkr]);
+
+  const projectedBalanceAfterPayment = useMemo(() => {
+    if (paymentTargetBalance == null || parsedPaymentAmountCents <= 0) return null;
+    return paymentTargetBalance - parsedPaymentAmountCents;
+  }, [parsedPaymentAmountCents, paymentTargetBalance]);
+
   const lateCancelsToday = useMemo(
     () => todaySessions.filter((s) => s.status === "late_cancel").length,
     [todaySessions],
@@ -325,24 +335,6 @@ export default function AdminPage() {
       status,
       chargeCents,
       statusUpdatedAt: Date.now(),
-    });
-  }
-
-  async function saveStudentFeeConfig(studentId: string, nextFeeLkr: string, nextDuration: string) {
-    setActionError(null);
-    const feeCents = Math.round(Number(nextFeeLkr) * 100);
-    const duration = Math.trunc(Number(nextDuration));
-    if (!Number.isFinite(feeCents) || feeCents <= 0) {
-      setActionError("Rate per session must be greater than 0.");
-      return;
-    }
-    if (!Number.isFinite(duration) || duration <= 0) {
-      setActionError("Session duration must be greater than 0 minutes.");
-      return;
-    }
-    await updateDoc(doc(db, col.students(), studentId), {
-      feePerSessionCents: feeCents,
-      sessionDurationMin: duration,
     });
   }
 
@@ -604,97 +596,6 @@ export default function AdminPage() {
       </div>
 
       <div className="card p-6">
-        <div className="flex items-center justify-between gap-2">
-          <div className="font-semibold">Fee setup per student</div>
-          {students.length > 12 ? (
-            <button className="btn btn-ghost" onClick={() => setShowAllFeeSetup((v) => !v)}>
-              {showAllFeeSetup ? "Show less" : "Show all"}
-            </button>
-          ) : null}
-        </div>
-        <div className="mt-2 text-xs text-[rgb(var(--muted))]">
-          Session charge is snapshot per session and is not recalculated later.
-        </div>
-        <div className="mt-3 grid gap-3 md:hidden">
-          {visibleFeeSetupStudents.map((s) => (
-            <div key={s.id} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4">
-              <div className="font-medium">{s.fullName}</div>
-              <div className="text-xs text-[rgb(var(--muted))] font-mono">{s.id}</div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <div className="label">Rate per session (LKR)</div>
-                  <input className="input" defaultValue={(s.feePerSessionCents / 100).toFixed(2)} id={`fee-mobile-${s.id}`} inputMode="decimal" />
-                </div>
-                <div className="space-y-1">
-                  <div className="label">Session duration (min)</div>
-                  <input className="input" defaultValue={String(s.sessionDurationMin)} id={`dur-mobile-${s.id}`} inputMode="numeric" />
-                </div>
-              </div>
-              <div className="mt-4 flex justify-end">
-                <button
-                  className="btn btn-primary w-full sm:w-auto"
-                  onClick={() => {
-                    const feeEl = document.getElementById(`fee-mobile-${s.id}`) as HTMLInputElement | null;
-                    const durEl = document.getElementById(`dur-mobile-${s.id}`) as HTMLInputElement | null;
-                    void saveStudentFeeConfig(s.id, feeEl?.value ?? "", durEl?.value ?? "");
-                  }}
-                >
-                  Save
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="mt-3 hidden overflow-x-auto md:block">
-          <table className="w-full text-sm">
-            <thead className="text-left text-[rgb(var(--muted))]">
-              <tr className="border-b border-[rgb(var(--border))]">
-                <th className="py-2 pr-3">Student</th>
-                <th className="py-2 pr-3">Rate per session (LKR)</th>
-                <th className="py-2 pr-3">Session duration (min)</th>
-                <th className="py-2 pr-3 text-right">Save</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleFeeSetupStudents.map((s) => {
-                return (
-                  <tr key={s.id} className="border-b border-[rgb(var(--border))]">
-                    <td className="py-2 pr-3">
-                      <div className="font-medium">{s.fullName}</div>
-                      <div className="text-xs text-[rgb(var(--muted))] font-mono">{s.id}</div>
-                    </td>
-                    <td className="py-2 pr-3">
-                      <input
-                        className="input"
-                        defaultValue={(s.feePerSessionCents / 100).toFixed(2)}
-                        id={`fee-${s.id}`}
-                        inputMode="decimal"
-                      />
-                    </td>
-                    <td className="py-2 pr-3">
-                      <input className="input" defaultValue={String(s.sessionDurationMin)} id={`dur-${s.id}`} inputMode="numeric" />
-                    </td>
-                    <td className="py-2 pr-3 text-right">
-                      <button
-                        className="btn btn-primary"
-                        onClick={() => {
-                          const feeEl = document.getElementById(`fee-${s.id}`) as HTMLInputElement | null;
-                          const durEl = document.getElementById(`dur-${s.id}`) as HTMLInputElement | null;
-                          void saveStudentFeeConfig(s.id, feeEl?.value ?? "", durEl?.value ?? "");
-                        }}
-                      >
-                        Save
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="card p-6">
         <div className="font-semibold">Today sessions: one-click attendance</div>
         <div className="mt-2 text-xs text-[rgb(var(--muted))]">
           Marking status updates financial charge instantly: attended = 100%, tutor cancel = 0%, early cancel = 0%, late cancel = 50%, no show = 100%.
@@ -826,60 +727,109 @@ export default function AdminPage() {
       </div>
 
       <div className="card p-6">
-        <div className="font-semibold">Add payment</div>
-        <div className="mt-2 text-xs text-[rgb(var(--muted))]">
-          If payment exceeds current balance, you will get a warning and can override.
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-6">
-          <div className="space-y-1">
-            <div className="label">Student *</div>
-            <select className="input" value={paymentStudentId} onChange={(e) => setPaymentStudentId(e.target.value)} required aria-required="true">
-              <option value="">Select student</option>
-              {students.filter((s) => s.active).map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.fullName}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <div className="label">Amount (LKR) *</div>
-            <input className="input" value={paymentAmountLkr} onChange={(e) => setPaymentAmountLkr(e.target.value)} inputMode="decimal" required aria-required="true" />
-          </div>
-          <div className="space-y-1">
-            <div className="label">Date *</div>
-            <input className="input" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} required aria-required="true" />
-          </div>
-          <div className="space-y-1">
-            <div className="label">Method</div>
-            <select className="input" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}>
-              <option value="cash">Cash</option>
-              <option value="bank">Bank</option>
-              <option value="online">Online</option>
-            </select>
-          </div>
-          <div className="space-y-1">
-            <div className="label">Payment type</div>
-            <select className="input" value={paymentType} onChange={(e) => setPaymentType(e.target.value as PaymentType)}>
-              <option value="single">Single payment</option>
-              <option value="prepaid_4_weeks">Prepaid 4 weeks</option>
-              <option value="prepaid_8_weeks">Prepaid 8 weeks</option>
-              <option value="settlement">Settlement</option>
-            </select>
-          </div>
-          <div className="space-y-1 md:col-span-2">
-            <div className="label">Coverage note</div>
-            <input className="input" value={paymentCoverageNote} onChange={(e) => setPaymentCoverageNote(e.target.value)} placeholder="e.g. Covers May weeks 1-4" />
-          </div>
-          <div className="space-y-1 md:col-span-2">
-            <div className="label">Notes</div>
-            <input className="input" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} placeholder="Optional" />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="font-semibold">Add payment</div>
+          <div className="text-xs text-[rgb(var(--muted))]">
+            If payment exceeds current balance, you will get a warning and can override.
           </div>
         </div>
-        <div className="mt-3 flex items-center justify-end gap-2">
-          <button className="btn btn-primary" disabled={paymentSubmitting} onClick={() => void addAdminPayment()}>
-            {paymentSubmitting ? "Saving..." : "Save payment"}
-          </button>
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_320px]">
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="space-y-1 md:col-span-2 xl:col-span-1">
+                <div className="label">Student *</div>
+                <select className="input" value={paymentStudentId} onChange={(e) => setPaymentStudentId(e.target.value)} required aria-required="true">
+                  <option value="">Select student</option>
+                  {students.filter((s) => s.active).map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.fullName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <div className="label">Amount (LKR) *</div>
+                <input className="input" value={paymentAmountLkr} onChange={(e) => setPaymentAmountLkr(e.target.value)} inputMode="decimal" required aria-required="true" />
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {[2500, 5000, 7500, 10000].map((amount) => (
+                    <button
+                      key={amount}
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => setPaymentAmountLkr(String(amount))}
+                    >
+                      LKR {amount}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="label">Date *</div>
+                <input className="input" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} required aria-required="true" />
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-1">
+                <div className="label">Method</div>
+                <select className="input" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}>
+                  <option value="cash">Cash</option>
+                  <option value="bank">Bank</option>
+                  <option value="online">Online</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <div className="label">Payment type</div>
+                <select className="input" value={paymentType} onChange={(e) => setPaymentType(e.target.value as PaymentType)}>
+                  <option value="single">Single payment</option>
+                  <option value="prepaid_4_weeks">Prepaid 4 weeks</option>
+                  <option value="prepaid_8_weeks">Prepaid 8 weeks</option>
+                  <option value="settlement">Settlement</option>
+                </select>
+              </div>
+              <div className="space-y-1 md:col-span-2">
+                <div className="label">Coverage note</div>
+                <input className="input" value={paymentCoverageNote} onChange={(e) => setPaymentCoverageNote(e.target.value)} placeholder="e.g. Covers May weeks 1-4" />
+              </div>
+              <div className="space-y-1 md:col-span-2">
+                <div className="label">Notes</div>
+                <input className="input" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} placeholder="Optional" />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button className="btn btn-primary w-full sm:w-auto" disabled={paymentSubmitting} onClick={() => void addAdminPayment()}>
+                {paymentSubmitting ? "Saving..." : "Save payment"}
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4">
+            <div className="text-sm font-semibold">Payment preview</div>
+            <div className="mt-3 space-y-2 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-[rgb(var(--muted))]">Student</span>
+                <span className="font-medium">{paymentStudent?.fullName ?? "-"}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[rgb(var(--muted))]">Amount</span>
+                <span className="font-medium">{parsedPaymentAmountCents > 0 ? formatMoneyLKR(parsedPaymentAmountCents) : "-"}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[rgb(var(--muted))]">Current balance</span>
+                <span className={`font-medium ${paymentTargetBalance != null && paymentTargetBalance > 0 ? "text-rose-500" : "text-emerald-500"}`}>
+                  {paymentTargetBalance != null ? formatMoneyLKR(paymentTargetBalance) : "-"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between border-t border-[rgb(var(--border))] pt-2">
+                <span className="text-[rgb(var(--muted))]">Projected balance</span>
+                <span className={`font-semibold ${projectedBalanceAfterPayment != null && projectedBalanceAfterPayment > 0 ? "text-rose-500" : "text-emerald-500"}`}>
+                  {projectedBalanceAfterPayment != null ? formatMoneyLKR(projectedBalanceAfterPayment) : "-"}
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
