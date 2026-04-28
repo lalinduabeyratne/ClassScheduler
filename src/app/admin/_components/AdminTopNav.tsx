@@ -11,6 +11,7 @@ export function AdminTopNav() {
     { href: "/admin", label: "Today" },
     { href: "/admin/calendar", label: "Calendar" },
     { href: "/admin/sessions", label: "Sessions" },
+    { href: "/admin/missed", label: "Missed" },
   ];
 
   const setupNav = [
