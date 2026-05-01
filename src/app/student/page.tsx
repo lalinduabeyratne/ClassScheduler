@@ -643,6 +643,30 @@ export default function StudentPage() {
       </div>
 
       <div className="card p-6">
+        <div className="font-semibold">Bank transfer details</div>
+        <div className="mt-1 text-xs text-[rgb(var(--muted))]">Include your student name or ID in the payment reference.</div>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+            <div className="text-sm font-semibold">LKR payments</div>
+            <div className="mt-1 text-xs">Account holder: Lalindu Abeyratne</div>
+            <div className="text-xs">Contact: 080020327116</div>
+            <div className="text-xs">Bank: Hatton National Bank</div>
+            <div className="mt-2 text-sm text-[rgb(var(--muted))]">Pay in LKR to the account above.</div>
+          </div>
+          <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/5 p-3">
+            <div className="text-sm font-semibold">USD payments (USD account)</div>
+            <div className="mt-1 text-xs">Bank: Hatton National Bank</div>
+            <div className="text-xs">SWIFT: HBLILKLX001</div>
+            <div className="text-xs">Branch: Marawila</div>
+            <div className="text-xs">Account Number: 080810118072</div>
+            <div className="text-xs">Bank Code: 7083 · Branch Code: 80</div>
+            <div className="text-xs">Account holder: Lalindu Abeyratne</div>
+            <div className="mt-2 text-sm text-[rgb(var(--muted))]">Use this account for USD payments only.</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card p-6">
         <div className="font-semibold">Unpaid sessions</div>
         <div className="mt-1 text-xs text-[rgb(var(--muted))]">
           Oldest session charges are covered first using verified payments.
@@ -835,6 +859,8 @@ export default function StudentPage() {
           </form>
         )}
       </div>
+
+      
 
       <div className="card p-6" id="payment-history">
         <div className="font-semibold">My payment history</div>
