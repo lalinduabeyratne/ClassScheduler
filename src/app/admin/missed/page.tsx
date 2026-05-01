@@ -116,7 +116,7 @@ export default function AdminMissedPage() {
     try {
       for (const s of selectedSessions) {
         const startAt = combineDateTimeMs(makeupDate, makeupTime);
-        await addDoc(collection(db, col.sessions()), {
+        const docRef = await addDoc(collection(db, col.sessions()), {
           studentId: s.studentId,
           startAt,
           endAt: startAt + duration * 60 * 1000,
@@ -128,13 +128,20 @@ export default function AdminMissedPage() {
           createdAt: Date.now(),
         });
 
+        const updatePayload: any = {
+          coverupStatus: "scheduled",
+          coverupSessionId: docRef.id,
+          coverupScheduledFor: startAt,
+          coverupScheduledAt: Date.now(),
+        };
+
         if (markOriginalAttended) {
-          await updateDoc(doc(db, "sessions", s.id), {
-            status: "attended",
-            chargeCents: s.feePerSessionCents ?? 0,
-            statusUpdatedAt: Date.now(),
-          });
+          updatePayload.status = "attended";
+          updatePayload.chargeCents = s.feePerSessionCents ?? 0;
+          updatePayload.statusUpdatedAt = Date.now();
         }
+
+        await updateDoc(doc(db, "sessions", s.id), updatePayload);
       }
       clearSelection();
       window.alert("Make-up sessions created.");
@@ -146,7 +153,13 @@ export default function AdminMissedPage() {
 
   async function markAsMadeUp(session: Session) {
     try {
-      await updateDoc(doc(db, "sessions", session.id), { status: "attended", chargeCents: session.feePerSessionCents ?? 0, statusUpdatedAt: Date.now() });
+      await updateDoc(doc(db, "sessions", session.id), {
+        status: "attended",
+        chargeCents: session.feePerSessionCents ?? 0,
+        statusUpdatedAt: Date.now(),
+        coverupStatus: "completed",
+        coverupCompletedAt: Date.now(),
+      });
     } catch (err) {
       console.error(err);
     }
@@ -270,9 +283,13 @@ export default function AdminMissedPage() {
                   </button>
                   <button className="btn btn-ghost" onClick={() => void removeSession(s)}>Delete</button>
                 </div>
-                <div className="mt-2 text-xs text-[rgb(var(--muted))]">
-                  Mark as completed changes this missed session to attended and applies the session fee.
-                </div>
+                {s.coverupStatus === "scheduled" ? (
+                  <div className="mt-2 text-sm text-[rgb(var(--muted))]">Make-up scheduled for {formatDateTime(s.coverupScheduledFor ?? 0)}.</div>
+                ) : s.coverupStatus === "completed" ? (
+                  <div className="mt-2 text-sm text-[rgb(var(--muted))]">Missed covered on {formatDateTime(s.coverupCompletedAt ?? 0)}.</div>
+                ) : (
+                  <div className="mt-2 text-xs text-[rgb(var(--muted))]">Mark as completed changes this missed session to attended and applies the session fee.</div>
+                )}
               </div>
             ))
           )}

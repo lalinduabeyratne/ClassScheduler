@@ -80,8 +80,15 @@ export type Session = {
   statusUpdatedAt?: number;
   feePerSessionCents: number; // snapshot at time of session
   chargeCents: number; // computed from status + feePerSessionCents
-  createdFrom: "timetable" | "reschedule" | "manual";
+  createdFrom: "timetable" | "reschedule" | "manual" | "makeup";
   notes?: string;
+  createdFromSessionId?: string;
+  // Optional fields for tracking make-up / cover-up sessions for missed classes
+  coverupStatus?: "scheduled" | "completed";
+  coverupSessionId?: string; // id of the created make-up session
+  coverupScheduledFor?: number; // epoch ms when the make-up is scheduled for
+  coverupScheduledAt?: number; // epoch ms when the make-up was scheduled
+  coverupCompletedAt?: number; // epoch ms when the make-up was completed
 };
 
 export type Payment = {

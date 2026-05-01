@@ -583,32 +583,63 @@ export default function StudentPage() {
       </div>
 
       <div className="card border-amber-500/40 bg-amber-500/10 p-6">
-        <div className="font-semibold text-amber-200">Classes to catch up</div>
-        <div className="mt-1 text-xs text-rose-100/80">
+        <div className="font-semibold text-amber-700 dark:text-amber-200">Classes to catch up</div>
+        <div className="mt-1 text-xs text-amber-700/80 dark:text-rose-100/80">
           Missed or canceled classes can slow progress. Request make-up classes to stay on track.
         </div>
         <div className="mt-3 grid gap-3 md:grid-cols-4">
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-            <div className="text-xs text-amber-100/80">Total to catch up</div>
-            <div className="text-xl font-semibold text-amber-100">{missedSummary.totalToCatchUp}</div>
+            <div className="text-xs text-amber-700 dark:text-amber-100/80">Total to catch up</div>
+            <div className="text-xl font-semibold text-amber-700 dark:text-amber-100">{missedSummary.totalToCatchUp}</div>
           </div>
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-            <div className="text-xs text-amber-100/80">You canceled early</div>
-            <div className="text-xl font-semibold text-amber-100">{missedSummary.earlyCancelCount}</div>
+            <div className="text-xs text-amber-700 dark:text-amber-100/80">You canceled early</div>
+            <div className="text-xl font-semibold text-amber-700 dark:text-amber-100">{missedSummary.earlyCancelCount}</div>
           </div>
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-            <div className="text-xs text-amber-100/80">You canceled late</div>
-            <div className="text-xl font-semibold text-amber-100">{missedSummary.lateCancelCount}</div>
+            <div className="text-xs text-amber-700 dark:text-amber-100/80">You canceled late</div>
+            <div className="text-xl font-semibold text-amber-700 dark:text-amber-100">{missedSummary.lateCancelCount}</div>
           </div>
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-            <div className="text-xs text-amber-100/80">No show</div>
-            <div className="text-xl font-semibold text-amber-100">{missedSummary.noShowCount}</div>
+            <div className="text-xs text-amber-700 dark:text-amber-100/80">No show</div>
+            <div className="text-xl font-semibold text-amber-700 dark:text-amber-100">{missedSummary.noShowCount}</div>
           </div>
           <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 p-3">
-            <div className="text-xs text-indigo-100/80">Tutor canceled</div>
-            <div className="text-xl font-semibold text-indigo-100">{missedSummary.tutorCanceledCount}</div>
+            <div className="text-xs text-indigo-700 dark:text-indigo-100/80">Tutor canceled</div>
+            <div className="text-xl font-semibold text-indigo-700 dark:text-indigo-100">{missedSummary.tutorCanceledCount}</div>
           </div>
         </div>
+        {missedSummary.totalToCatchUp > 0 && (
+          <div className="mt-4">
+            <div className="text-xs font-semibold text-amber-700 dark:text-amber-200 mb-2">Recent missed classes:</div>
+            <ul className="space-y-2 text-xs">
+              {[...missedSessions, ...tutorCanceledSessions]
+                .sort((a, b) => (b.startAt ?? 0) - (a.startAt ?? 0))
+                .slice(0, 5)
+                .map((s) => (
+                  <li key={s.id} className="rounded border border-amber-500/30 bg-amber-500/5 p-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1">
+                        <div className="font-medium text-amber-700 dark:text-amber-100">{formatDateTimeCompact(s.startAt)}</div>
+                        <div className="text-amber-700/70 dark:text-amber-100/70 capitalize">{s.status.replaceAll("_", " ")}</div>
+                      </div>
+                      {s.coverupStatus === "scheduled" ? (
+                        <div className="text-right">
+                          <div className="text-emerald-700 dark:text-emerald-300 font-medium">Scheduled</div>
+                          <div className="text-emerald-700/70 dark:text-emerald-300/70">{formatDateTimeCompact(s.coverupScheduledFor ?? 0)}</div>
+                        </div>
+                      ) : s.coverupStatus === "completed" ? (
+                        <div className="text-right">
+                          <div className="text-emerald-700 dark:text-emerald-300 font-medium">Covered</div>
+                          <div className="text-emerald-700/70 dark:text-emerald-300/70">{formatDateTimeCompact(s.coverupCompletedAt ?? 0)}</div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </li>
+                ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       <div className="card p-6">
@@ -672,7 +703,7 @@ export default function StudentPage() {
                         <div className="flex items-center gap-2 text-xs text-[rgb(var(--muted))]">
                           <span>{s.status.replaceAll("_", " ")}</span>
                           {isScheduledPaid ? (
-                            <span className="rounded-full border border-emerald-400/60 bg-emerald-500/15 px-2 py-0.5 text-emerald-200">
+                            <span className="rounded-full border border-emerald-400/60 bg-emerald-500/15 px-2 py-0.5 text-emerald-700 dark:text-emerald-200">
                               Already paid
                             </span>
                           ) : null}

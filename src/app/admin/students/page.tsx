@@ -1192,6 +1192,7 @@ export default function AdminStudentsPage() {
                     <tr className="border-b border-[rgb(var(--border))]">
                       <th className="py-2 pr-3">Date</th>
                       <th className="py-2 pr-3">Status</th>
+                      <th className="py-2 pr-3">Make-up / Coverup</th>
                       <th className="py-2 pr-3 text-right">Charge</th>
                     </tr>
                   </thead>
@@ -1212,12 +1213,27 @@ export default function AdminStudentsPage() {
                             ) : null}
                           </div>
                         </td>
+                        <td className="py-2 pr-3">
+                          {s.coverupStatus === "scheduled" ? (
+                            <div className="space-y-0.5">
+                              <div className="text-emerald-600 dark:text-emerald-400 font-medium">Scheduled</div>
+                              <div className="text-emerald-600/70 dark:text-emerald-400/70 text-xs">{new Date(s.coverupScheduledFor ?? 0).toLocaleString()}</div>
+                            </div>
+                          ) : s.coverupStatus === "completed" ? (
+                            <div className="space-y-0.5">
+                              <div className="text-emerald-600 dark:text-emerald-400 font-medium">Covered</div>
+                              <div className="text-emerald-600/70 dark:text-emerald-400/70 text-xs">{new Date(s.coverupCompletedAt ?? 0).toLocaleString()}</div>
+                            </div>
+                          ) : (
+                            <span className="text-[rgb(var(--muted))]">-</span>
+                          )}
+                        </td>
                         <td className="py-2 pr-3 text-right">{formatMoneyLKR(s.chargeCents)}</td>
                       </tr>
                     ))}
                     {selectedAttendance.length === 0 ? (
                       <tr>
-                        <td className="py-4 text-[rgb(var(--muted))]" colSpan={3}>
+                        <td className="py-4 text-[rgb(var(--muted))]" colSpan={4}>
                           No attendance records.
                         </td>
                       </tr>
