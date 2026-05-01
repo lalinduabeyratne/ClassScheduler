@@ -65,7 +65,11 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+      <footer className="absolute bottom-4 left-0 w-full text-center">
+        <div className="text-xs text-[rgb(var(--muted))]">Made with <span aria-hidden>❤️</span> by Lalindu</div>
+      </footer>
     </div>
   );
 }
+
 
