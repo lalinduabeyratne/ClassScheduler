@@ -60,7 +60,7 @@ export default function HomePage() {
             </div>
             <div className="floating-card floating-card-bottom">
               <p className="text-xs font-medium text-[rgb(var(--muted))]">This week</p>
-              <p className="text-sm font-semibold">12 classes scheduled</p>
+              <p className="text-sm font-semibold">31 classes scheduled this week</p>
             </div>
           </div>
         </div>
