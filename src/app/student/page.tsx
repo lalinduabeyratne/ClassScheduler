@@ -649,8 +649,9 @@ export default function StudentPage() {
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
             <div className="text-sm font-semibold">LKR payments</div>
             <div className="mt-1 text-xs">Account holder: Lalindu Abeyratne</div>
-            <div className="text-xs">Contact: 080020327116</div>
-            <div className="text-xs">Bank: Hatton National Bank</div>
+            <div className="text-xs">Account Number: 080020327116</div>
+            <div className="text-xs">Bank: HNB</div>
+            <div className="text-xs">Branch ID: 080</div>
             <div className="mt-2 text-sm text-[rgb(var(--muted))]">Pay in LKR to the account above.</div>
           </div>
           <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/5 p-3">
