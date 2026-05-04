@@ -4,24 +4,24 @@ import React from 'react';
 import { motion } from 'framer-motion';
 
 type GradientDotsProps = React.ComponentProps<typeof motion.div> & {
-	/** Dot size (default: 8) */
+	/** Dot size (default: 12) */
 	dotSize?: number;
-	/** Spacing between dots (default: 10) */
+	/** Spacing between dots (default: 20) */
 	spacing?: number;
-	/** Animation duration (default: 30) */
+	/** Animation duration (default: 20) */
 	duration?: number;
-	/** Color cycle duration (default: 6) */
+	/** Color cycle duration (default: 8) */
 	colorCycleDuration?: number;
-	/** Background color (default: 'var(--background)') */
+	/** Background color (default: 'rgba(10, 10, 20, 1)') */
 	backgroundColor?: string;
 };
 
 export function GradientDots({
-	dotSize = 8,
-	spacing = 10,
-	duration = 30,
-	colorCycleDuration = 6,
-	backgroundColor = 'var(--background)',
+	dotSize = 12,
+	spacing = 20,
+	duration = 20,
+	colorCycleDuration = 8,
+	backgroundColor = 'rgba(10, 10, 20, 1)',
 	className,
 	...props
 }: GradientDotsProps) {
@@ -33,32 +33,35 @@ export function GradientDots({
 			style={{
 				backgroundColor,
 				backgroundImage: `
-          radial-gradient(circle at 50% 50%, transparent 1.5px, ${backgroundColor} 0 ${dotSize}px, transparent ${dotSize}px),
-          radial-gradient(circle at 50% 50%, transparent 1.5px, ${backgroundColor} 0 ${dotSize}px, transparent ${dotSize}px),
-          radial-gradient(circle at 50% 50%, #f00, transparent 60%),
-          radial-gradient(circle at 50% 50%, #ff0, transparent 60%),
-          radial-gradient(circle at 50% 50%, #0f0, transparent 60%),
-          radial-gradient(ellipse at 50% 50%, #00f, transparent 60%)
-        `,
+					radial-gradient(circle, #ff1493 0%, #ff1493 ${dotSize}px, transparent ${dotSize + 2}px),
+					radial-gradient(circle, #00d4ff 0%, #00d4ff ${dotSize}px, transparent ${dotSize + 2}px),
+					radial-gradient(circle, #00ff88 0%, #00ff88 ${dotSize}px, transparent ${dotSize + 2}px),
+					radial-gradient(circle, #ffd700 0%, #ffd700 ${dotSize}px, transparent ${dotSize + 2}px),
+					radial-gradient(circle, #9d4edd 0%, #9d4edd ${dotSize}px, transparent ${dotSize + 2}px),
+					radial-gradient(circle, #ff006e 0%, #ff006e ${dotSize}px, transparent ${dotSize + 2}px)
+				`,
 				backgroundSize: `
-          ${spacing}px ${hexSpacing}px,
-          ${spacing}px ${hexSpacing}px,
-          200% 200%,
-          200% 200%,
-          200% 200%,
-          200% ${hexSpacing}px
-        `,
+					${spacing * 2}px ${hexSpacing * 2}px,
+					${spacing * 2}px ${hexSpacing * 2}px,
+					${spacing * 2}px ${hexSpacing * 2}px,
+					${spacing * 2}px ${hexSpacing * 2}px,
+					${spacing * 2}px ${hexSpacing * 2}px,
+					${spacing * 2}px ${hexSpacing * 2}px
+				`,
 				backgroundPosition: `
-          0px 0px, ${spacing / 2}px ${hexSpacing / 2}px,
-          0% 0%,
-          0% 0%,
-          0% 0px
-        `,
+					0px 0px,
+					${spacing}px ${hexSpacing / 2}px,
+					${spacing * 0.5}px ${hexSpacing * 1.5}px,
+					${spacing * 1.5}px ${hexSpacing * 1.5}px,
+					${spacing * 1.5}px ${hexSpacing * 0.5}px,
+					${spacing * 0.5}px ${hexSpacing * 0.5}px
+				`,
+				backgroundRepeat: 'repeat',
 			}}
 			animate={{
 				backgroundPosition: [
-					`0px 0px, ${spacing / 2}px ${hexSpacing / 2}px, 800% 400%, 1000% -400%, -1200% -600%, 400% ${hexSpacing}px`,
-					`0px 0px, ${spacing / 2}px ${hexSpacing / 2}px, 0% 0%, 0% 0%, 0% 0%, 0% 0%`,
+					`0px 0px, ${spacing}px ${hexSpacing / 2}px, ${spacing * 0.5}px ${hexSpacing * 1.5}px, ${spacing * 1.5}px ${hexSpacing * 1.5}px, ${spacing * 1.5}px ${hexSpacing * 0.5}px, ${spacing * 0.5}px ${hexSpacing * 0.5}px`,
+					`${spacing}px ${hexSpacing}px, ${spacing * 2}px ${hexSpacing * 1.5}px, ${spacing * 1.5}px ${hexSpacing * 2.5}px, ${spacing * 2.5}px ${hexSpacing * 2.5}px, ${spacing * 2.5}px ${hexSpacing * 1.5}px, ${spacing * 1.5}px ${hexSpacing * 1.5}px`,
 				],
 				filter: ['hue-rotate(0deg)', 'hue-rotate(360deg)'],
 			}}
@@ -80,5 +83,13 @@ export function GradientDots({
 }
 
 export default function GradientDotsBackground() {
-	return <GradientDots />;
+	return (
+		<GradientDots
+			dotSize={12}
+			spacing={20}
+			duration={20}
+			colorCycleDuration={8}
+			backgroundColor="rgba(10, 10, 20, 1)"
+		/>
+	);
 }
