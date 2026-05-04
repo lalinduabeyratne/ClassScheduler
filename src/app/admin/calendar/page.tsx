@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AdminTopNav } from "@/app/admin/_components/AdminTopNav";
 import { computeChargeCents } from "@/lib/billing/fee";
+import { exportTimetableWeeklyReport } from "@/lib/billing/exportPdf";
 import { db } from "@/lib/firebase/client";
 import { useAuthUser } from "@/lib/firebase/useAuthUser";
 import { getUserRole } from "@/lib/roles/getUserRole";
@@ -23,6 +24,18 @@ function yyyymmdd(d: Date) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+function weekBoundsFromDateValue(dateValue: string) {
+  const anchor = new Date(`${dateValue}T00:00:00`);
+  const day = anchor.getDay();
+  const offsetToMonday = day === 0 ? -6 : 1 - day;
+  const start = new Date(anchor);
+  start.setDate(anchor.getDate() + offsetToMonday);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 7);
+  return { startMs: start.getTime(), endMs: end.getTime() };
 }
 
 function dayLabel(ms: number) {
@@ -153,6 +166,10 @@ export default function AdminCalendarPage() {
   const [rangeDays, setRangeDays] = useState(7);
   const [statusFilter, setStatusFilter] = useState<"all" | AttendanceStatus>("all");
   const [studentFilter, setStudentFilter] = useState<string>("all");
+  
+  const initialWeek = useMemo(() => weekBoundsFromDateValue(yyyymmdd(new Date())), []);
+  const [reportStartDate, setReportStartDate] = useState(() => yyyymmdd(new Date(initialWeek.startMs)));
+  const [reportEndDate, setReportEndDate] = useState(() => yyyymmdd(new Date(initialWeek.endMs - 24 * 60 * 60 * 1000)));
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editStartTime, setEditStartTime] = useState("");
   const [editEndTime, setEditEndTime] = useState("");
@@ -161,6 +178,14 @@ export default function AdminCalendarPage() {
 
   const startMs = useMemo(() => startOfDayMs(new Date(`${selectedDate}T00:00:00`)), [selectedDate]);
   const endMs = useMemo(() => startMs + rangeDays * 24 * 60 * 60 * 1000, [rangeDays, startMs]);
+  const reportRange = useMemo(() => {
+    const start = new Date(`${reportStartDate}T00:00:00`);
+    const end = new Date(`${reportEndDate}T00:00:00`);
+    const startMs = start.getTime();
+    const endMs = end.getTime() + 24 * 60 * 60 * 1000;
+    return { startMs, endMs };
+  }, [reportEndDate, reportStartDate]);
+  const reportRangeValid = reportRange.endMs > reportRange.startMs;
 
   useEffect(() => {
     if (loading) return;
@@ -197,6 +222,11 @@ export default function AdminCalendarPage() {
     [endMs, ready, startMs],
   );
   const { data: sessions } = useFirestoreQuery<Session>(sessionsQuery);
+  const weeklyReportQuery = useMemo(
+    () => (ready ? qSessionsBetween({ startAtMs: reportRange.startMs, endAtMs: reportRange.endMs }) : null),
+    [ready, reportRange.endMs, reportRange.startMs],
+  );
+  const { data: weeklyReportSessions } = useFirestoreQuery<Session>(weeklyReportQuery);
   const { students, byId: studentsById } = useStudentsMap(ready);
 
   const filteredSessions = useMemo(() => {
@@ -254,6 +284,23 @@ export default function AdminCalendarPage() {
     }
     return labels;
   }, [viewEndHour]);
+
+  function exportWeeklyReport() {
+    if (!reportRangeValid) {
+      setActionError("The report end date must be after the start date.");
+      return;
+    }
+    if (!weeklyReportSessions.length) {
+      setActionError("No sessions found for the selected range.");
+      return;
+    }
+    exportTimetableWeeklyReport({
+      startDate: reportStartDate,
+      endDate: reportEndDate,
+      sessions: weeklyReportSessions,
+      studentsById,
+    });
+  }
 
   const slotMinutes = useMemo(() => {
     const start = VIEW_START_HOUR * 60;
@@ -466,6 +513,45 @@ export default function AdminCalendarPage() {
           <button className="btn btn-ghost" onClick={() => setSelectedDate(yyyymmdd(new Date()))}>
             Jump to today
           </button>
+        </div>
+        <div className="mt-4 rounded-lg border border-[rgb(var(--border))] bg-black/5 p-4 dark:bg-white/5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold">Timetable report range</div>
+              <div className="mt-1 text-xs text-[rgb(var(--muted))]">
+                Select any start and end date. The report includes all timetable sessions in that range, including make-ups and extra classes.
+              </div>
+            </div>
+            <div />
+          </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-[repeat(3,minmax(0,1fr))]">
+            <label className="space-y-1 text-xs text-[rgb(var(--muted))]">
+              Start date
+              <input
+                className="input"
+                type="date"
+                value={reportStartDate}
+                onChange={(e) => setReportStartDate(e.target.value)}
+              />
+            </label>
+            <label className="space-y-1 text-xs text-[rgb(var(--muted))]">
+              End date
+              <input
+                className="input"
+                type="date"
+                value={reportEndDate}
+                onChange={(e) => setReportEndDate(e.target.value)}
+              />
+            </label>
+            <div className="flex flex-wrap items-end gap-2">
+              <button className="btn btn-primary" onClick={() => exportWeeklyReport()} disabled={!reportRangeValid || !weeklyReportSessions.length}>
+                Export report
+              </button>
+            </div>
+          </div>
+          <div className="mt-2 text-xs text-[rgb(var(--muted))]">
+            Covers {weeklyReportSessions.length} session{weeklyReportSessions.length === 1 ? "" : "s"} in the selected range.
+          </div>
         </div>
       </div>
 
