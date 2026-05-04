@@ -6,15 +6,16 @@ import Starfield from "./Starfield";
 import AntiGravityBackground from "./AntiGravityBackground";
 import { GridHeroBackground } from "./GridHeroBackground";
 import { PrismaVideoBackground } from "./PrismaVideoBackground";
+import GradientDotsBackground from "./GradientDotsBackground";
 
-type BackgroundType = "shader" | "starfield" | "antigravity" | "gridhero" | "prisma";
+type BackgroundType = "shader" | "starfield" | "antigravity" | "gridhero" | "prisma" | "gradientdots";
 
 export function RandomBackground() {
   const [selectedBg, setSelectedBg] = useState<BackgroundType | null>(null);
 
   useEffect(() => {
     // Pick a random background on mount
-    const variants: BackgroundType[] = ["shader", "starfield", "antigravity", "gridhero", "prisma"];
+    const variants: BackgroundType[] = ["shader", "starfield", "antigravity", "gridhero", "prisma", "gradientdots"];
     const choice = variants[Math.floor(Math.random() * variants.length)];
     setSelectedBg(choice);
   }, []);
@@ -36,6 +37,7 @@ export function RandomBackground() {
       {selectedBg === "antigravity" && <AntiGravityBackground />}
       {selectedBg === "gridhero" && <GridHeroBackground />}
       {selectedBg === "prisma" && <PrismaVideoBackground />}
+      {selectedBg === "gradientdots" && <GradientDotsBackground />}
     </>
   );
 }
