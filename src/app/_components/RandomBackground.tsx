@@ -4,15 +4,17 @@ import { useEffect, useState } from "react";
 import CyberneticGridShader from "./ShaderAnimation";
 import Starfield from "./Starfield";
 import AntiGravityBackground from "./AntiGravityBackground";
+import { GridHeroBackground } from "./GridHeroBackground";
+import { PrismaVideoBackground } from "./PrismaVideoBackground";
 
-type BackgroundType = "shader" | "starfield" | "antigravity";
+type BackgroundType = "shader" | "starfield" | "antigravity" | "gridhero" | "prisma";
 
 export function RandomBackground() {
   const [selectedBg, setSelectedBg] = useState<BackgroundType | null>(null);
 
   useEffect(() => {
     // Pick a random background on mount
-    const variants: BackgroundType[] = ["shader", "starfield", "antigravity"];
+    const variants: BackgroundType[] = ["shader", "starfield", "antigravity", "gridhero", "prisma"];
     const choice = variants[Math.floor(Math.random() * variants.length)];
     setSelectedBg(choice);
   }, []);
@@ -32,6 +34,8 @@ export function RandomBackground() {
         />
       )}
       {selectedBg === "antigravity" && <AntiGravityBackground />}
+      {selectedBg === "gridhero" && <GridHeroBackground />}
+      {selectedBg === "prisma" && <PrismaVideoBackground />}
     </>
   );
 }

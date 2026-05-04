@@ -241,6 +241,14 @@ textarea:focus-visible {
   color: rgb(15 23 42);
 }
 
+.noise-overlay {
+  background-image:
+    radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.08) 0.5px, transparent 0.7px),
+    radial-gradient(circle at 80% 60%, rgba(255, 255, 255, 0.06) 0.5px, transparent 0.7px),
+    radial-gradient(circle at 40% 80%, rgba(255, 255, 255, 0.07) 0.5px, transparent 0.7px);
+  background-size: 3px 3px, 4px 4px, 5px 5px;
+}
+
 @media (prefers-color-scheme: dark) {
   .metric-chip {
     border-color: rgba(125, 211, 252, 0.4);
