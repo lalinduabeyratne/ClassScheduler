@@ -6,7 +6,22 @@ import Starfield from './Starfield';
 import AntiGravityBackground from './AntiGravityBackground';
 import { GridHeroBackground } from './GridHeroBackground';
 import { PrismaVideoBackground } from './PrismaVideoBackground';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+
+function IconChevronLeft(props: React.SVGProps<SVGSVGElement>) {
+	return (
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" {...props}>
+			<polyline points="15 18 9 12 15 6" />
+		</svg>
+	);
+}
+
+function IconChevronRight(props: React.SVGProps<SVGSVGElement>) {
+	return (
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" {...props}>
+			<polyline points="9 18 15 12 9 6" />
+		</svg>
+	);
+}
 
 type BackgroundType = 'shader' | 'starfield' | 'antigravity' | 'gridhero' | 'prisma';
 
@@ -78,7 +93,7 @@ export function BackgroundSelector() {
 					aria-label="Previous background"
 					title="Previous background"
 				>
-					<ChevronLeft className="h-4 w-4 text-slate-700 dark:text-slate-300" />
+					<IconChevronLeft className="h-4 w-4 text-slate-700 dark:text-slate-300" />
 				</button>
 
 				<span className="min-w-32 text-center text-sm font-medium text-slate-700 dark:text-slate-300">
@@ -91,7 +106,7 @@ export function BackgroundSelector() {
 					aria-label="Next background"
 					title="Next background"
 				>
-					<ChevronRight className="h-4 w-4 text-slate-700 dark:text-slate-300" />
+					<IconChevronRight className="h-4 w-4 text-slate-700 dark:text-slate-300" />
 				</button>
 			</div>
 		</>
