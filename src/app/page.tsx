@@ -1,9 +1,11 @@
-import { RandomBackground } from "./_components/RandomBackground";
+import { BackgroundSelector } from "./_components/BackgroundSelector";
+import { ThemeToggle } from "./_components/ThemeToggle";
 
 export default function HomePage() {
   return (
     <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-slate-100 dark:bg-black">
-      <RandomBackground />
+      <ThemeToggle />
+      <BackgroundSelector />
       <section className="relative z-10 flex min-h-screen w-full items-center overflow-hidden p-6 text-slate-900 dark:text-slate-100 md:p-10">
         <div className="relative mx-auto grid w-full max-w-6xl items-center justify-center gap-10 md:grid-cols-[1.15fr_0.85fr]">
           <div>
