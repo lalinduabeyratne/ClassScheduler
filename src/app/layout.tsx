@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { ThemeProvider } from "./_components/ThemeProvider";
 
 export const metadata: Metadata = {
   title: "Lalindu Abeyratne - Physics",
@@ -12,9 +13,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body>
-        <main className="min-h-screen">{children}</main>
+        <ThemeProvider>
+          <main className="min-h-screen">{children}</main>
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -35,7 +35,7 @@ const BACKGROUND_NAMES: Record<BackgroundType, string> = {
 };
 
 export function BackgroundSelector() {
-	const [currentIndex, setCurrentIndex] = useState(0);
+	const [currentIndex, setCurrentIndex] = useState(4); // Default to Prisma (index 4)
 	const [mounted, setMounted] = useState(false);
 
 	useEffect(() => {
@@ -45,8 +45,8 @@ export function BackgroundSelector() {
 		if (saved) {
 			setCurrentIndex(parseInt(saved, 10));
 		} else {
-			// Random on first visit
-			setCurrentIndex(Math.floor(Math.random() * BACKGROUNDS.length));
+			// Default to Prisma on first visit
+			setCurrentIndex(4);
 		}
 	}, []);
 
