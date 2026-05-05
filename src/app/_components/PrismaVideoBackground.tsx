@@ -142,8 +142,8 @@ export function PrismaVideoBackground() {
         src={VIDEO_SRC}
       />
 
-      <div className="noise-overlay pointer-events-none absolute inset-0 opacity-70 mix-blend-overlay" />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/60" />
+      <div className="noise-overlay pointer-events-none absolute inset-0 opacity-80 mix-blend-overlay" />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-black/70" />
     </div>
   );
 }

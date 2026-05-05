@@ -27,7 +27,8 @@ export function GridHeroBackground() {
     const lights: LightParticle[] = [];
     let lastTime = 0;
 
-    const isDarkMode = () => document.documentElement.classList.contains("dark");
+    // Grid Hero should always use the light color theme regardless of site dark mode
+    const isDarkMode = () => false;
 
     const resizeCanvas = () => {
       const rect = canvas.getBoundingClientRect();
@@ -201,9 +202,10 @@ export function GridHeroBackground() {
     };
   }, []);
 
-  return (
-    <div className="absolute inset-0 z-0 overflow-hidden bg-white dark:bg-black" aria-hidden>
-      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" style={{ width: "100%", height: "100%" }} />
-    </div>
-  );
+    return (
+      <div className="absolute inset-0 z-0 overflow-hidden bg-white" aria-hidden>
+        <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" style={{ width: "100%", height: "100%" }} />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/20 to-transparent" />
+      </div>
+    );
 }

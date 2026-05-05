@@ -14,12 +14,12 @@ export default function HomePage() {
             </span>
 
             <h1 className="mt-4">
-              <div className="text-5xl font-black tracking-tighter text-white drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)] dark:drop-shadow-none dark:text-slate-100 md:text-7xl">
+              <div className="text-5xl font-black tracking-tighter text-slate-300 drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)] dark:drop-shadow-none dark:text-slate-200 md:text-7xl">
                 Lalindu Abeyratne
               </div>
-              <span className="block text-2xl font-bold text-cyan-300 drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)] dark:drop-shadow-none dark:text-cyan-300 md:text-4xl">Physics Academy</span>
+              <span className="block text-2xl font-bold text-cyan-200 drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)] dark:drop-shadow-none dark:text-cyan-200 md:text-4xl">Physics Academy</span>
             </h1>
-            <p className="mt-4 max-w-2xl text-base text-slate-700 dark:text-slate-300 md:text-lg">
+            <p className="mt-4 max-w-2xl text-base text-slate-300 drop-shadow-[0_3px_6px_rgba(0,0,0,0.9)] dark:text-slate-300 dark:drop-shadow-[0_3px_6px_rgba(0,0,0,0.8)] md:text-lg">
               A smarter class scheduler inspired by orbital motion, wave cycles, and momentum -
               built to keep lessons, payments, and student progress in perfect sync.
             </p>

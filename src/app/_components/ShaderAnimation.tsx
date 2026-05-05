@@ -119,19 +119,23 @@ export default function CyberneticGridShader() {
   }, []);
 
   return (
-    <div
-      ref={containerRef}
-      className="shader-container"
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        width: "100vw",
-        height: "100vh",
-        zIndex: 0,
-        pointerEvents: "none",
-      }}
-      aria-label="Cybernetic grid animated background"
-    />
+    <div style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }} aria-label="Cybernetic grid animated background">
+      <div
+        ref={containerRef}
+        className="shader-container"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          pointerEvents: 'none',
+        }}
+      />
+
+      {/* Subtle dark overlay to improve text contrast */}
+      <div className="pointer-events-none absolute inset-0 bg-black/40" />
+    </div>
   );
 }
+

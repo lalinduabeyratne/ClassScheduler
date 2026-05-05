@@ -96,6 +96,12 @@ export default function AdminSessionsHistoryPage() {
     session: Session;
     timeoutId: ReturnType<typeof setTimeout>;
   } | null>(null);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editDate, setEditDate] = useState<string>(dayInputValue(new Date()));
+  const [editTime, setEditTime] = useState<string>('18:00');
+  const [editDurationMin, setEditDurationMin] = useState<string>('60');
+  const [editStatus, setEditStatus] = useState<AttendanceStatus>('scheduled');
+  const [editNotes, setEditNotes] = useState<string>('');
   const [pendingStatusUndo, setPendingStatusUndo] = useState<{
     sessionId: string;
     prevStatus: AttendanceStatus;
@@ -259,6 +265,48 @@ export default function AdminSessionsHistoryPage() {
       prevChargeCents: session.chargeCents,
       timeoutId,
     });
+  }
+
+  function openEdit(session: Session) {
+    setEditingSessionId(session.id);
+    const d = new Date(session.startAt);
+    setEditDate(dayInputValue(d));
+    setEditTime(d.toTimeString().slice(0, 5));
+    setEditDurationMin(String(Math.max(1, Math.trunc((session.endAt - session.startAt) / 60000))));
+    setEditStatus(session.status);
+    setEditNotes(session.notes ?? '');
+  }
+
+  function closeEdit() {
+    setEditingSessionId(null);
+  }
+
+  async function saveEdit() {
+    if (!editingSessionId) return;
+    setActionError(null);
+    try {
+      const startAt = combineDateTimeMs(editDate, editTime);
+      const durationMin = Math.max(1, Math.trunc(Number(editDurationMin) || 60));
+      const endAt = startAt + durationMin * 60 * 1000;
+
+      const updateData: Partial<Session> & { statusUpdatedAt: number } = {
+        startAt,
+        endAt,
+        status: editStatus,
+        statusUpdatedAt: Date.now(),
+      };
+      const trimmedNotes = (editNotes ?? '').trim();
+      if (trimmedNotes !== '') {
+        // only include notes when non-empty to avoid sending `undefined` which Firestore rejects
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (updateData as any).notes = trimmedNotes;
+      }
+
+      await updateDoc(doc(db, col.sessions(), editingSessionId), updateData);
+      closeEdit();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to save session.');
+    }
   }
 
   async function undoStatusChange() {
@@ -694,24 +742,27 @@ export default function AdminSessionsHistoryPage() {
                 </div>
 
                 <div className="mt-4 grid gap-2">
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  <div className="flex flex-nowrap gap-1 overflow-x-auto pb-1">
                     {(["scheduled", "attended", "tutor_cancel", "late_cancel", "no_show", "early_cancel"] as AttendanceStatus[]).map((status) => (
                       <button
                         key={status}
-                        className={`btn w-full ${statusClass(session.status === status, status)}`}
+                        className={`btn btn-sm px-2 py-1 text-xs flex-shrink-0 ${statusClass(session.status === status, status)}`}
                         onClick={() => void updateStatus(session, status)}
                       >
                         {statusLabel(status)}
                       </button>
                     ))}
                   </div>
-                  <button
-                    className="btn btn-ghost w-full"
-                    onClick={() => void deleteSession(session)}
-                    disabled={pendingDelete?.session.id === session.id}
-                  >
-                    {pendingDelete?.session.id === session.id ? "Pending..." : "Delete session"}
-                  </button>
+                  <div className="mt-2 flex gap-2">
+                    <button className="btn" onClick={() => openEdit(session)}>Edit</button>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => void deleteSession(session)}
+                      disabled={pendingDelete?.session.id === session.id}
+                    >
+                      {pendingDelete?.session.id === session.id ? 'Pending...' : 'Delete session'}
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -758,12 +809,12 @@ export default function AdminSessionsHistoryPage() {
                     <div className="text-xs text-[rgb(var(--muted))] font-mono">{session.studentId}</div>
                   </td>
                   <td className="py-2 pr-3">
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-nowrap gap-1 overflow-x-auto">
                       {(["scheduled", "attended", "tutor_cancel", "late_cancel", "no_show", "early_cancel"] as AttendanceStatus[]).map(
                         (status) => (
                           <button
                             key={status}
-                            className={`btn ${statusClass(session.status === status, status)}`}
+                            className={`btn btn-sm px-2 py-1 text-xs flex-shrink-0 ${statusClass(session.status === status, status)}`}
                             onClick={() => void updateStatus(session, status)}
                           >
                             {status.replaceAll("_", " ")}
@@ -776,13 +827,16 @@ export default function AdminSessionsHistoryPage() {
                     {formatMoneyLKR(session.chargeCents)}
                   </td>
                   <td className="py-2 pr-3 text-right">
-                    <button
-                      className="btn btn-ghost"
-                      onClick={() => void deleteSession(session)}
-                      disabled={pendingDelete?.session.id === session.id}
-                    >
-                      {pendingDelete?.session.id === session.id ? "Pending..." : "Delete"}
-                    </button>
+                    <div className="flex items-center justify-end gap-2">
+                      <button className="btn btn-outline" onClick={() => openEdit(session)}>Edit</button>
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => void deleteSession(session)}
+                        disabled={pendingDelete?.session.id === session.id}
+                      >
+                        {pendingDelete?.session.id === session.id ? 'Pending...' : 'Delete'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -809,6 +863,54 @@ export default function AdminSessionsHistoryPage() {
           </table>
         </div>
       </div>
+      {editingSessionId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={closeEdit} />
+          <div className="relative z-10 w-full max-w-xl rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-6">
+            <div className="flex items-center justify-between">
+              <div className="font-semibold">Edit session</div>
+              <div className="text-xs text-[rgb(var(--muted))]">ID: {editingSessionId}</div>
+            </div>
+
+            <div className="mt-4 grid gap-3">
+              <div>
+                <div className="label">Date</div>
+                <input className="input" type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} />
+              </div>
+
+              <div>
+                <div className="label">Time</div>
+                <input className="input" type="time" value={editTime} onChange={(e) => setEditTime(e.target.value)} />
+              </div>
+
+              <div>
+                <div className="label">Duration (minutes)</div>
+                <input className="input" type="number" min={1} value={editDurationMin} onChange={(e) => setEditDurationMin(e.target.value)} />
+              </div>
+
+              <div>
+                <div className="label">Status</div>
+                <select className="input" value={editStatus} onChange={(e) => setEditStatus(e.target.value as AttendanceStatus)}>
+                  {(["scheduled", "attended", "tutor_cancel", "late_cancel", "no_show", "early_cancel"] as AttendanceStatus[]).map((s) => (
+                    <option key={s} value={s}>{statusLabel(s)}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="label">Notes</div>
+                <textarea className="input h-24" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button className="btn" onClick={saveEdit}>Save</button>
+              <button className="btn btn-ghost" onClick={closeEdit}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
+
