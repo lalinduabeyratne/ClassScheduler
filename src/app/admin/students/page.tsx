@@ -1206,31 +1206,31 @@ export default function AdminStudentsPage() {
             </div>
 
             <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-3">
-              <div className="text-sm font-semibold text-rose-200">Missed classes and missed revenue</div>
+              <div className="text-sm font-semibold text-rose-700 dark:text-rose-200">Missed classes and missed revenue</div>
               <div className="mt-2 grid gap-2 text-sm md:grid-cols-6">
                 <div>
-                  <div className="text-xs text-rose-100/80">Total missed</div>
-                  <div className="font-semibold text-rose-100">{selectedMissedSummary.totalMissed}</div>
+                  <div className="text-xs text-rose-700/80 dark:text-rose-100/80">Total missed</div>
+                  <div className="font-semibold text-rose-700 dark:text-rose-100">{selectedMissedSummary.totalMissed}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-indigo-100/80">Tutor canceled</div>
-                  <div className="font-semibold text-indigo-100">{selectedMissedSummary.tutorCanceledCount}</div>
+                  <div className="text-xs text-indigo-700/80 dark:text-indigo-100/80">Tutor canceled</div>
+                  <div className="font-semibold text-indigo-700 dark:text-indigo-100">{selectedMissedSummary.tutorCanceledCount}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-rose-100/80">Early cancel</div>
-                  <div className="font-semibold text-rose-100">{selectedMissedSummary.earlyCancelCount}</div>
+                  <div className="text-xs text-rose-700/80 dark:text-rose-100/80">Early cancel</div>
+                  <div className="font-semibold text-rose-700 dark:text-rose-100">{selectedMissedSummary.earlyCancelCount}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-rose-100/80">Late cancel</div>
-                  <div className="font-semibold text-rose-100">{selectedMissedSummary.lateCancelCount}</div>
+                  <div className="text-xs text-rose-700/80 dark:text-rose-100/80">Late cancel</div>
+                  <div className="font-semibold text-rose-700 dark:text-rose-100">{selectedMissedSummary.lateCancelCount}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-rose-100/80">No show</div>
-                  <div className="font-semibold text-rose-100">{selectedMissedSummary.noShowCount}</div>
+                  <div className="text-xs text-rose-700/80 dark:text-rose-100/80">No show</div>
+                  <div className="font-semibold text-rose-700 dark:text-rose-100">{selectedMissedSummary.noShowCount}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-rose-100/80">Missed revenue</div>
-                  <div className="font-semibold text-rose-100">{formatMoneyLKR(selectedMissedSummary.missedRevenueCents)}</div>
+                  <div className="text-xs text-rose-700/80 dark:text-rose-100/80">Missed revenue</div>
+                  <div className="font-semibold text-rose-700 dark:text-rose-100">{formatMoneyLKR(selectedMissedSummary.missedRevenueCents)}</div>
                 </div>
               </div>
             </div>
