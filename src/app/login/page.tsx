@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase/client";
 import { useAuthUser } from "@/lib/firebase/useAuthUser";
 import { getUserRole } from "@/lib/roles/getUserRole";
+import { ThemeToggle } from "../_components/ThemeToggle";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -65,6 +66,7 @@ export default function LoginPage() {
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-6 md:px-6 md:py-8">
+      <ThemeToggle />
       <div className="mx-auto max-w-md">
         <div className="card p-6">
           <div className="text-lg font-semibold">Login</div>

@@ -1144,6 +1144,7 @@ export default function AdminPage() {
                 <button
                   className="btn btn-primary w-full"
                   onClick={async () => {
+                    setActionError(null);
                     const reqId = String(r.id);
                     const fromSessionId = String(r.fromSessionId);
                     const session = allSessions.find((s) => s.id === fromSessionId);
@@ -1155,28 +1156,58 @@ export default function AdminPage() {
                     })}`;
 
                     if (!session) {
-                      throw new Error("Original session could not be found.");
+                      setActionError("Original session could not be found.");
+                      try {
+                        await updateDoc(doc(db, "rescheduleRequests", reqId), {
+                          status: "approved",
+                          updatedAt: Date.now(),
+                          applied: false,
+                          adminNote: "session-not-found",
+                        });
+                      } catch {}
+                      return;
                     }
 
-                    await updateDoc(doc(db, "sessions", fromSessionId), {
-                      startAt: requestedStartAt,
-                      endAt: requestedEndAt,
-                      createdFrom: "reschedule",
-                    });
+                    let sessionApplied = false;
+                    let noteParts: string[] = [];
+
+                    try {
+                      await updateDoc(doc(db, "sessions", fromSessionId), {
+                        startAt: requestedStartAt,
+                        endAt: requestedEndAt,
+                        createdFrom: "reschedule",
+                      });
+                      sessionApplied = true;
+                    } catch (err) {
+                      noteParts.push("session-update-failed");
+                      if (err instanceof Error) setActionError(err.message);
+                      else setActionError("Session update failed");
+                    }
 
                     if (session.slotId) {
                       const slotRef = doc(db, col.timetableSlots(), session.slotId);
-                      await updateDoc(slotRef, {
-                        exceptions: arrayUnion(
-                          `${new Date(session.startAt).toISOString().slice(0, 10)} | ${rescheduleNote}`,
-                        ),
-                      });
+                      try {
+                        await updateDoc(slotRef, {
+                          exceptions: arrayUnion(
+                            `${new Date(session.startAt).toISOString().slice(0, 10)} | ${rescheduleNote}`,
+                          ),
+                        });
+                      } catch (err) {
+                        noteParts.push("slot-update-failed");
+                        if (!sessionApplied && err instanceof Error && !actionError) setActionError(err.message);
+                      }
                     }
 
-                    await updateDoc(doc(db, "rescheduleRequests", reqId), {
-                      status: "approved",
-                      updatedAt: Date.now(),
-                    });
+                    try {
+                      await updateDoc(doc(db, "rescheduleRequests", reqId), {
+                        status: "approved",
+                        updatedAt: Date.now(),
+                        applied: sessionApplied,
+                        adminNote: noteParts.join(",") || "",
+                      });
+                    } catch (err) {
+                      if (err instanceof Error) setActionError(err.message);
+                    }
                   }}
                 >
                   Approve
@@ -1184,11 +1215,17 @@ export default function AdminPage() {
                 <button
                   className="btn btn-ghost w-full"
                   onClick={async () => {
-                    const reqId = String(r.id);
-                    await updateDoc(doc(db, "rescheduleRequests", reqId), {
-                      status: "rejected",
-                      updatedAt: Date.now(),
-                    });
+                    setActionError(null);
+                    try {
+                      const reqId = String(r.id);
+                      await updateDoc(doc(db, "rescheduleRequests", reqId), {
+                        status: "rejected",
+                        updatedAt: Date.now(),
+                      });
+                    } catch (err) {
+                      console.error(err);
+                      setActionError(err instanceof Error ? err.message : "Failed to reject request.");
+                    }
                   }}
                 >
                   Reject
@@ -1232,6 +1269,7 @@ export default function AdminPage() {
                       <button
                         className="btn btn-primary"
                         onClick={async () => {
+                          setActionError(null);
                           const reqId = String(r.id);
                           const fromSessionId = String(r.fromSessionId);
                           const session = allSessions.find((s) => s.id === fromSessionId);
@@ -1243,28 +1281,57 @@ export default function AdminPage() {
                           })}`;
 
                           if (!session) {
-                            throw new Error("Original session could not be found.");
+                            setActionError("Original session could not be found.");
+                            try {
+                              await updateDoc(doc(db, "rescheduleRequests", reqId), {
+                                status: "approved",
+                                updatedAt: Date.now(),
+                                applied: false,
+                                adminNote: "session-not-found",
+                              });
+                            } catch {}
+                            return;
                           }
 
-                          await updateDoc(doc(db, "sessions", fromSessionId), {
-                            startAt: requestedStartAt,
-                            endAt: requestedEndAt,
-                            createdFrom: "reschedule",
-                          });
+                          let sessionApplied = false;
+                          let noteParts: string[] = [];
+
+                          try {
+                            await updateDoc(doc(db, "sessions", fromSessionId), {
+                              startAt: requestedStartAt,
+                              endAt: requestedEndAt,
+                              createdFrom: "reschedule",
+                            });
+                            sessionApplied = true;
+                          } catch (err) {
+                            noteParts.push("session-update-failed");
+                            if (err instanceof Error) setActionError(err.message);
+                          }
 
                           if (session.slotId) {
-                            const slotRef = doc(db, col.timetableSlots(), session.slotId);
-                            await updateDoc(slotRef, {
-                              exceptions: arrayUnion(
-                                `${new Date(session.startAt).toISOString().slice(0, 10)} | ${rescheduleNote}`,
-                              ),
-                            });
+                            try {
+                              const slotRef = doc(db, col.timetableSlots(), session.slotId);
+                              await updateDoc(slotRef, {
+                                exceptions: arrayUnion(
+                                  `${new Date(session.startAt).toISOString().slice(0, 10)} | ${rescheduleNote}`,
+                                ),
+                              });
+                            } catch (err) {
+                              noteParts.push("slot-update-failed");
+                              if (!sessionApplied && err instanceof Error && !actionError) setActionError(err.message);
+                            }
                           }
 
-                          await updateDoc(doc(db, "rescheduleRequests", reqId), {
-                            status: "approved",
-                            updatedAt: Date.now(),
-                          });
+                          try {
+                            await updateDoc(doc(db, "rescheduleRequests", reqId), {
+                              status: "approved",
+                              updatedAt: Date.now(),
+                              applied: sessionApplied,
+                              adminNote: noteParts.join(",") || "",
+                            });
+                          } catch (err) {
+                            if (err instanceof Error) setActionError(err.message);
+                          }
                         }}
                       >
                         Approve
@@ -1272,11 +1339,17 @@ export default function AdminPage() {
                       <button
                         className="btn btn-ghost"
                         onClick={async () => {
-                          const reqId = String(r.id);
-                          await updateDoc(doc(db, "rescheduleRequests", reqId), {
-                            status: "rejected",
-                            updatedAt: Date.now(),
-                          });
+                          setActionError(null);
+                          try {
+                            const reqId = String(r.id);
+                            await updateDoc(doc(db, "rescheduleRequests", reqId), {
+                              status: "rejected",
+                              updatedAt: Date.now(),
+                            });
+                          } catch (err) {
+                            console.error('Failed to set request to rejected', err);
+                            setActionError(err instanceof Error ? `Reject failed: ${err.message}` : "Failed to reject request.");
+                          }
                         }}
                       >
                         Reject

@@ -57,6 +57,11 @@ service cloud.firestore {
         && slotHasValidTimeRange(request.resource.data)
         && slotHasStudents(request.resource.data);
     }
+    function adminCanAppendExceptions() {
+      return isAdmin()
+        && request.resource.data.exceptions is list
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly(["exceptions"]);
+    }
 
     match /users/{uid} {
       allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
@@ -71,7 +76,7 @@ service cloud.firestore {
     match /timetableSlots/{slotId} {
       allow read: if isSignedIn();
       allow create: if createSlotAllowed();
-      allow update: if isAdmin() && (unlockOnlyUpdateAllowed() || unlockedEditAllowed());
+      allow update: if isAdmin() && (unlockOnlyUpdateAllowed() || unlockedEditAllowed() || adminCanAppendExceptions());
       allow delete: if isAdmin();
     }
 

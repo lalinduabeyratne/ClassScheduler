@@ -337,6 +337,16 @@ export default function StudentPage() {
       .sort((a, b) => (b.startAt ?? 0) - (a.startAt ?? 0));
   }, [sessions]);
 
+  const pendingMakeupSessions = useMemo(() => {
+    return [...missedSessions, ...tutorCanceledSessions]
+      .filter((s) => !s.coverupStatus || (s.coverupStatus !== "scheduled" && s.coverupStatus !== "completed"))
+      .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0));
+  }, [missedSessions, tutorCanceledSessions]);
+
+  const pendingMakeupValue = useMemo(() => {
+    return pendingMakeupSessions.reduce((sum, s) => sum + Math.max(0, Number(s.feePerSessionCents ?? 0)), 0);
+  }, [pendingMakeupSessions]);
+
   const missedSummary = useMemo(() => {
     const earlyCancelCount = missedSessions.filter((s) => s.status === "early_cancel").length;
     const lateCancelCount = missedSessions.filter((s) => s.status === "late_cancel").length;
@@ -581,6 +591,43 @@ export default function StudentPage() {
           </div>
         )}
       </div>
+
+      {pendingMakeupSessions.length > 0 && (
+        <div className="card border-orange-500/40 bg-orange-500/10 p-6">
+          <div className="font-semibold text-orange-700 dark:text-orange-200">Pending makeup sessions</div>
+          <div className="mt-1 text-xs text-orange-700/80 dark:text-orange-100/80">
+            These sessions were missed or canceled. The credit reserved for these makeups is included in your advance balance.
+          </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div className="rounded-lg border border-orange-500/30 bg-orange-500/10 p-3">
+              <div className="text-xs text-orange-700 dark:text-orange-100/80">Sessions pending makeup</div>
+              <div className="text-2xl font-semibold text-orange-700 dark:text-orange-100">{pendingMakeupSessions.length}</div>
+            </div>
+            <div className="rounded-lg border border-orange-500/30 bg-orange-500/10 p-3">
+              <div className="text-xs text-orange-700 dark:text-orange-100/80">Credit reserved for makeup</div>
+              <div className="text-2xl font-semibold text-orange-700 dark:text-orange-100">{formatMoneyLKR(pendingMakeupValue)}</div>
+            </div>
+          </div>
+          {pendingMakeupSessions.length > 0 && (
+            <div className="mt-4">
+              <div className="text-xs font-semibold text-orange-700 dark:text-orange-200 mb-2">Pending makeups:</div>
+              <ul className="space-y-2 text-xs">
+                {pendingMakeupSessions.slice(0, 5).map((s) => (
+                  <li key={s.id} className="rounded border border-orange-500/30 bg-orange-500/5 p-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1">
+                        <div className="font-medium text-orange-700 dark:text-orange-100">{formatDateTimeCompact(s.startAt)}</div>
+                        <div className="text-orange-700/70 dark:text-orange-100/70 capitalize">{s.status.replaceAll("_", " ")}</div>
+                      </div>
+                      <div className="text-right font-medium text-orange-700 dark:text-orange-100">{formatMoneyLKR(Math.max(0, Number(s.feePerSessionCents ?? 0)))}</div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="card border-amber-500/40 bg-amber-500/10 p-6">
         <div className="font-semibold text-amber-700 dark:text-amber-200">Classes to catch up</div>
