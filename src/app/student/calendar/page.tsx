@@ -4,9 +4,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuthUser } from "@/lib/firebase/useAuthUser";
 import { getUserRole } from "@/lib/roles/getUserRole";
-import { getUserDoc, qSessionsForStudent } from "@/lib/firestore/api";
+import { getUserDoc, qSessionsForStudent, qPaymentsForStudent } from "@/lib/firestore/api";
 import { useFirestoreQuery } from "@/lib/firestore/hooks";
-import type { Session } from "@/lib/model/types";
+import type { Session, Payment } from "@/lib/model/types";
+import { allocateVerifiedPaymentsOldestFirst } from "@/lib/billing/rollup";
 import { StudentTopNav } from "@/app/student/_components/StudentTopNav";
 
 function dayLabel(ms: number) {
@@ -69,7 +70,35 @@ export default function StudentCalendarPage() {
     () => (studentId && !accessError ? qSessionsForStudent(studentId) : null),
     [accessError, studentId],
   );
+  const paymentsQuery = useMemo(
+    () => (studentId && !accessError ? qPaymentsForStudent(studentId) : null),
+    [accessError, studentId],
+  );
   const { data: sessions } = useFirestoreQuery<Session>(sessionsQuery);
+  const { data: payments } = useFirestoreQuery<Payment>(paymentsQuery);
+
+  // Calculate prepaid coverage for all upcoming sessions
+  const sessionsPrepaidCoverage = useMemo(() => {
+    const paymentCoverage = allocateVerifiedPaymentsOldestFirst({ sessions, payments });
+    const nowMs = Date.now();
+    const upcomingScheduled = sessions
+      .filter((s) => (s.startAt ?? 0) > nowMs && s.status === "scheduled" && Math.max(0, Number(s.feePerSessionCents ?? 0)) > 0)
+      .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0));
+
+    let remainingCredit = paymentCoverage.remainingCreditCents;
+    const coveredIds = new Set<string>(paymentCoverage.fullyPaidSessionIds);
+
+    for (const session of upcomingScheduled) {
+      if (coveredIds.has(session.id)) continue;
+      const chargeCents = Math.max(0, Number(session.feePerSessionCents ?? 0));
+      if (remainingCredit >= chargeCents) {
+        coveredIds.add(session.id);
+        remainingCredit -= chargeCents;
+      }
+    }
+
+    return coveredIds;
+  }, [sessions, payments]);
 
   const next7Days = useMemo(() => {
     const start = new Date();
@@ -139,17 +168,29 @@ export default function StudentCalendarPage() {
               <div key={key} className="card p-4">
                 <div className="font-semibold">{dayLabel(daySessions[0]!.startAt)}</div>
                 <ul className="mt-3 space-y-2 text-sm">
-                  {daySessions.map((s) => (
-                    <li key={s.id} className="rounded-lg border border-[rgb(var(--border))] p-3">
-                      <div className="text-xs text-[rgb(var(--muted))]">
-                        {timeLabel(s.startAt)} - {timeLabel(s.endAt)}
-                      </div>
-                      <div className="mt-1 font-medium">Session</div>
-                      <div className="mt-1 text-xs text-[rgb(var(--muted))]">
-                        {s.status.replaceAll("_", " ")}
-                      </div>
-                    </li>
-                  ))}
+                  {daySessions.map((s) => {
+                    const isPrepaid = sessionsPrepaidCoverage.has(s.id);
+                    return (
+                      <li key={s.id} className={`rounded-lg border p-3 ${isPrepaid ? "border-emerald-500/50 bg-emerald-500/10" : "border-[rgb(var(--border))]"}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1">
+                            <div className="text-xs text-[rgb(var(--muted))]">
+                              {timeLabel(s.startAt)} - {timeLabel(s.endAt)}
+                            </div>
+                            <div className="mt-1 font-medium">Session</div>
+                            <div className="mt-1 text-xs text-[rgb(var(--muted))]">
+                              {s.status.replaceAll("_", " ")}
+                            </div>
+                          </div>
+                          {isPrepaid && (
+                            <span className="shrink-0 rounded-full bg-emerald-500/30 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-100">
+                              Prepaid
+                            </span>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             ))}
@@ -160,16 +201,26 @@ export default function StudentCalendarPage() {
               <div key={key} className="card p-6">
                 <div className="font-semibold">{dayLabel(daySessions[0]!.startAt)}</div>
                 <ul className="mt-3 space-y-2 text-sm">
-                  {daySessions.map((s) => (
-                    <li key={s.id} className="flex items-center justify-between">
-                      <div className="font-medium">
-                        {timeLabel(s.startAt)} - {timeLabel(s.endAt)}
-                      </div>
-                      <div className="text-xs text-[rgb(var(--muted))]">
-                        {s.status.replaceAll("_", " ")}
-                      </div>
-                    </li>
-                  ))}
+                  {daySessions.map((s) => {
+                    const isPrepaid = sessionsPrepaidCoverage.has(s.id);
+                    return (
+                      <li key={s.id} className="flex items-center justify-between">
+                        <div className="font-medium">
+                          {timeLabel(s.startAt)} - {timeLabel(s.endAt)}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="text-xs text-[rgb(var(--muted))]">
+                            {s.status.replaceAll("_", " ")}
+                          </div>
+                          {isPrepaid && (
+                            <span className="rounded-full bg-emerald-500/30 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-100">
+                              Prepaid
+                            </span>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             ))}

@@ -288,16 +288,20 @@ export default function StudentPage() {
       .slice(0, 10);
   }, [sessions]);
 
-  const sessionsPrepaidCoverage = useMemo(() => {
-    const scheduledUpcoming = upcomingSessions.filter(
-      (session) => session.status === "scheduled" && Math.max(0, Number(session.feePerSessionCents ?? 0)) > 0,
-    );
+  // All upcoming scheduled sessions (for prepaid coverage across all months)
+  const allUpcomingScheduledSessions = useMemo(() => {
+    const nowMs = Date.now();
+    return sessions
+      .filter((s) => (s.startAt ?? 0) > nowMs && s.status === "scheduled" && Math.max(0, Number(s.feePerSessionCents ?? 0)) > 0)
+      .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0));
+  }, [sessions]);
 
+  const sessionsPrepaidCoverage = useMemo(() => {
     let remainingCredit = paymentCoverage.remainingCreditCents;
     const coveredIds = new Set<string>(paymentCoverage.fullyPaidSessionIds);
 
-    // Mark additional sessions covered by remaining credit
-    for (const session of scheduledUpcoming) {
+    // Mark additional sessions covered by remaining credit (including next month)
+    for (const session of allUpcomingScheduledSessions) {
       if (coveredIds.has(session.id)) continue;
       const chargeCents = Math.max(0, Number(session.feePerSessionCents ?? 0));
       if (remainingCredit >= chargeCents) {
@@ -307,13 +311,10 @@ export default function StudentPage() {
     }
 
     return coveredIds;
-  }, [paymentCoverage, upcomingSessions]);
+  }, [paymentCoverage, allUpcomingScheduledSessions]);
 
   const prepaidUpcomingSummary = useMemo(() => {
-    const scheduledUpcoming = upcomingSessions.filter(
-      (session) => session.status === "scheduled" && Math.max(0, Number(session.feePerSessionCents ?? 0)) > 0,
-    );
-    const fullyPaidUpcoming = scheduledUpcoming.filter((session) =>
+    const fullyPaidUpcoming = allUpcomingScheduledSessions.filter((session) =>
       sessionsPrepaidCoverage.has(session.id),
     );
 
@@ -321,7 +322,7 @@ export default function StudentPage() {
       paidCount: fullyPaidUpcoming.length,
       paidCents: fullyPaidUpcoming.reduce((sum, session) => sum + Math.max(0, Number(session.feePerSessionCents ?? 0)), 0),
     };
-  }, [sessionsPrepaidCoverage, upcomingSessions]);
+  }, [sessionsPrepaidCoverage, allUpcomingScheduledSessions]);
 
   const missedSessions = useMemo(() => {
     const nowMs = Date.now();
