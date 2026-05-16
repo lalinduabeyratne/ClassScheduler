@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import CyberneticGridShader from './ShaderAnimation';
 import Starfield from './Starfield';
 import AntiGravityBackground from './AntiGravityBackground';
@@ -34,7 +34,27 @@ const BACKGROUND_NAMES: Record<BackgroundType, string> = {
 	prisma: 'Prisma Video',
 };
 
-export function BackgroundSelector() {
+type BackgroundSelectorContextValue = {
+	currentBg: BackgroundType;
+	currentBgName: string;
+	handleNext: () => void;
+	handlePrev: () => void;
+	mounted: boolean;
+};
+
+const BackgroundSelectorContext = createContext<BackgroundSelectorContextValue | null>(null);
+
+function useBackgroundSelectorContext() {
+	const value = useContext(BackgroundSelectorContext);
+
+	if (!value) {
+		throw new Error('BackgroundSelector controls must be used within BackgroundSelectorProvider');
+	}
+
+	return value;
+}
+
+export function BackgroundSelectorProvider({ children }: { children: React.ReactNode }) {
 	const [currentIndex, setCurrentIndex] = useState(4); // Default to Prisma (index 4)
 	const [mounted, setMounted] = useState(false);
 
@@ -52,17 +72,38 @@ export function BackgroundSelector() {
 
 	const currentBg = BACKGROUNDS[currentIndex];
 
-	const handleNext = () => {
-		const newIndex = (currentIndex + 1) % BACKGROUNDS.length;
-		setCurrentIndex(newIndex);
-		localStorage.setItem('backgroundIndex', newIndex.toString());
-	};
+	const handleNext = useCallback(() => {
+		setCurrentIndex((current) => {
+			const newIndex = (current + 1) % BACKGROUNDS.length;
+			localStorage.setItem('backgroundIndex', newIndex.toString());
+			return newIndex;
+		});
+	}, []);
 
-	const handlePrev = () => {
-		const newIndex = (currentIndex - 1 + BACKGROUNDS.length) % BACKGROUNDS.length;
-		setCurrentIndex(newIndex);
-		localStorage.setItem('backgroundIndex', newIndex.toString());
-	};
+	const handlePrev = useCallback(() => {
+		setCurrentIndex((current) => {
+			const newIndex = (current - 1 + BACKGROUNDS.length) % BACKGROUNDS.length;
+			localStorage.setItem('backgroundIndex', newIndex.toString());
+			return newIndex;
+		});
+	}, []);
+
+	const value = useMemo(
+		() => ({
+			currentBg,
+			currentBgName: BACKGROUND_NAMES[currentBg],
+			handleNext,
+			handlePrev,
+			mounted,
+		}),
+		[currentBg, handleNext, handlePrev, mounted],
+	);
+
+	return <BackgroundSelectorContext.Provider value={value}>{children}</BackgroundSelectorContext.Provider>;
+}
+
+export function BackgroundLayer() {
+	const { currentBg, mounted } = useBackgroundSelectorContext();
 
 	if (!mounted) {
 		return null;
@@ -70,7 +111,6 @@ export function BackgroundSelector() {
 
 	return (
 		<>
-			{/* Background */}
 			{currentBg === 'shader' && <CyberneticGridShader />}
 			{currentBg === 'starfield' && (
 				<Starfield
@@ -84,31 +124,60 @@ export function BackgroundSelector() {
 			{currentBg === 'antigravity' && <AntiGravityBackground />}
 			{currentBg === 'gridhero' && <GridHeroBackground />}
 			{currentBg === 'prisma' && <PrismaVideoBackground />}
-
-			{/* Background Toggle Controls - Bottom on desktop, lower on mobile */}
-			<div className="glass-surface fixed left-6 top-48 z-50 flex items-center gap-2 px-3 py-2 md:top-auto md:bottom-6">
-				<button
-					onClick={handlePrev}
-					className="rounded p-1.5 transition hover:bg-slate-100 dark:hover:bg-slate-800"
-					aria-label="Previous background"
-					title="Previous background"
-				>
-					<IconChevronLeft className="h-4 w-4 text-slate-700 dark:text-slate-300" />
-				</button>
-
-				<span className="min-w-32 text-center text-sm font-medium text-slate-700 dark:text-slate-300">
-					{BACKGROUND_NAMES[currentBg]}
-				</span>
-
-				<button
-					onClick={handleNext}
-					className="rounded p-1.5 transition hover:bg-slate-100 dark:hover:bg-slate-800"
-					aria-label="Next background"
-					title="Next background"
-				>
-					<IconChevronRight className="h-4 w-4 text-slate-700 dark:text-slate-300" />
-				</button>
-			</div>
 		</>
 	);
+}
+
+export function BackgroundControls({ variant }: { variant: 'desktop' | 'mobile' }) {
+	const { currentBg, currentBgName, handleNext, handlePrev, mounted } = useBackgroundSelectorContext();
+
+	if (!mounted) {
+		return null;
+	}
+
+	if (variant === 'mobile') {
+		return (
+			<button
+				onClick={handleNext}
+				className="glass-surface inline-flex max-w-[16rem] items-center gap-2 px-3 py-3 md:hidden"
+				aria-label="Change background"
+				title={`Change background: ${currentBgName}`}
+			>
+				<IconChevronRight className="h-5 w-5 shrink-0 text-slate-700 dark:text-slate-200" />
+				<span className="truncate text-xs font-medium text-slate-700 dark:text-slate-200">
+					{currentBgName}
+				</span>
+			</button>
+		);
+	}
+
+	return (
+		<div className="glass-surface fixed left-6 top-48 z-50 hidden items-center gap-2 px-3 py-2 md:flex md:top-auto md:bottom-6">
+			<button
+				onClick={handlePrev}
+				className="rounded p-1.5 transition hover:bg-slate-100 dark:hover:bg-slate-800"
+				aria-label="Previous background"
+				title="Previous background"
+			>
+				<IconChevronLeft className="h-4 w-4 text-slate-700 dark:text-slate-300" />
+			</button>
+
+			<span className="min-w-32 text-center text-sm font-medium text-slate-700 dark:text-slate-300">
+				{currentBgName}
+			</span>
+
+			<button
+				onClick={handleNext}
+				className="rounded p-1.5 transition hover:bg-slate-100 dark:hover:bg-slate-800"
+				aria-label="Next background"
+				title="Next background"
+			>
+				<IconChevronRight className="h-4 w-4 text-slate-700 dark:text-slate-300" />
+			</button>
+		</div>
+	);
+}
+
+export function BackgroundSelector() {
+	return null;
 }
