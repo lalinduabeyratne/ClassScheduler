@@ -15,6 +15,11 @@ export function PrismaVideoBackground() {
     }
 
     const startPlayback = () => {
+      video.muted = true;
+      video.defaultMuted = true;
+      video.playsInline = true;
+      video.setAttribute("playsinline", "true");
+      video.setAttribute("webkit-playsinline", "true");
       const playPromise = video.play();
       if (playPromise) {
         playPromise.catch(() => {
@@ -30,10 +35,16 @@ export function PrismaVideoBackground() {
       startPlayback();
     };
 
+    const handleCanPlay = () => {
+      startPlayback();
+    };
+
     video.addEventListener('loadeddata', handleLoadedData);
+    video.addEventListener('canplay', handleCanPlay);
 
     return () => {
       video.removeEventListener('loadeddata', handleLoadedData);
+      video.removeEventListener('canplay', handleCanPlay);
       video.pause();
     };
   }, []);
@@ -45,6 +56,7 @@ export function PrismaVideoBackground() {
         autoPlay
         muted
         playsInline
+        webkit-playsinline="true"
         loop
         disablePictureInPicture
         preload="auto"
