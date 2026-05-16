@@ -85,8 +85,8 @@ export function BackgroundSelector() {
 			{currentBg === 'gridhero' && <GridHeroBackground />}
 			{currentBg === 'prisma' && <PrismaVideoBackground />}
 
-			{/* Background Toggle Controls - Bottom on desktop, top on mobile */}
-			<div className="glass-surface fixed left-6 top-20 z-50 flex items-center gap-2 px-3 py-2 md:top-auto md:bottom-6">
+			{/* Background Toggle Controls - Bottom on desktop, lower on mobile */}
+			<div className="glass-surface fixed left-6 top-48 z-50 flex items-center gap-2 px-3 py-2 md:top-auto md:bottom-6">
 				<button
 					onClick={handlePrev}
 					className="rounded p-1.5 transition hover:bg-slate-100 dark:hover:bg-slate-800"
