@@ -288,11 +288,11 @@ export default function StudentPage() {
       .slice(0, 10);
   }, [sessions]);
 
-  // All upcoming scheduled sessions (for prepaid coverage across all months)
-  const allUpcomingScheduledSessions = useMemo(() => {
+  // All upcoming chargeable sessions (for prepaid coverage across all months)
+  const allUpcomingChargeableSessions = useMemo(() => {
     const nowMs = Date.now();
     return sessions
-      .filter((s) => (s.startAt ?? 0) > nowMs && s.status === "scheduled" && Math.max(0, Number(s.feePerSessionCents ?? 0)) > 0)
+      .filter((s) => (s.startAt ?? 0) > nowMs && Math.max(0, Number(s.feePerSessionCents ?? 0)) > 0)
       .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0));
   }, [sessions]);
 
@@ -301,7 +301,7 @@ export default function StudentPage() {
     const coveredIds = new Set<string>(paymentCoverage.fullyPaidSessionIds);
 
     // Mark additional sessions covered by remaining credit (including next month)
-    for (const session of allUpcomingScheduledSessions) {
+    for (const session of allUpcomingChargeableSessions) {
       if (coveredIds.has(session.id)) continue;
       const chargeCents = Math.max(0, Number(session.feePerSessionCents ?? 0));
       if (remainingCredit >= chargeCents) {
@@ -311,10 +311,10 @@ export default function StudentPage() {
     }
 
     return coveredIds;
-  }, [paymentCoverage, allUpcomingScheduledSessions]);
+  }, [paymentCoverage, allUpcomingChargeableSessions]);
 
   const prepaidUpcomingSummary = useMemo(() => {
-    const fullyPaidUpcoming = allUpcomingScheduledSessions.filter((session) =>
+    const fullyPaidUpcoming = allUpcomingChargeableSessions.filter((session) =>
       sessionsPrepaidCoverage.has(session.id),
     );
 
@@ -322,7 +322,7 @@ export default function StudentPage() {
       paidCount: fullyPaidUpcoming.length,
       paidCents: fullyPaidUpcoming.reduce((sum, session) => sum + Math.max(0, Number(session.feePerSessionCents ?? 0)), 0),
     };
-  }, [sessionsPrepaidCoverage, allUpcomingScheduledSessions]);
+  }, [sessionsPrepaidCoverage, allUpcomingChargeableSessions]);
 
   const missedSessions = useMemo(() => {
     const nowMs = Date.now();
@@ -767,7 +767,6 @@ export default function StudentPage() {
                 <ul className="space-y-2 text-sm">
                   {upcomingSessions.slice(0, 3).map((s) => {
                     const isScheduledPaid =
-                      s.status === "scheduled" &&
                       sessionsPrepaidCoverage.has(s.id) &&
                       Math.max(0, Number(s.feePerSessionCents ?? 0)) > 0;
                     return (

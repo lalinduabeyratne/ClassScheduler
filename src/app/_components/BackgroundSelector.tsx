@@ -86,7 +86,7 @@ export function BackgroundSelector() {
 			{currentBg === 'prisma' && <PrismaVideoBackground />}
 
 			{/* Background Toggle Controls - Bottom on desktop, top on mobile */}
-			<div className="fixed left-6 z-50 flex items-center gap-2 rounded-lg border border-slate-300 bg-white/90 px-3 py-2 shadow-md backdrop-blur dark:border-slate-700 dark:bg-slate-900/90 top-20 md:top-auto md:bottom-6">
+			<div className="glass-surface fixed left-6 top-20 z-50 flex items-center gap-2 px-3 py-2 md:top-auto md:bottom-6">
 				<button
 					onClick={handlePrev}
 					className="rounded p-1.5 transition hover:bg-slate-100 dark:hover:bg-slate-800"

@@ -32,10 +32,10 @@ export default function HomePage() {
                 Login
               </a>
             </div>
-            <div className="mt-6 flex flex-wrap gap-3 text-sm text-slate-700 dark:text-slate-200">
-              <span className="metric-chip">Quantum-ready Timetable</span>
-              <span className="metric-chip">Wave-smooth Attendance</span>
-              <span className="metric-chip">Energy-balanced Billing</span>
+            <div className="mt-6 hidden gap-3 text-sm text-slate-700 dark:text-slate-200 md:flex md:flex-wrap">
+              <span className="metric-chip shrink-0 whitespace-nowrap">Quantum-ready Timetable</span>
+              <span className="metric-chip shrink-0 whitespace-nowrap">Wave-smooth Attendance</span>
+              <span className="metric-chip shrink-0 whitespace-nowrap">Energy-balanced Billing</span>
             </div>
           </div>
 

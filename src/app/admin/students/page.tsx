@@ -296,10 +296,9 @@ export default function AdminStudentsPage() {
   );
 
   const selectedSessionsPrepaidCoverage = useMemo(() => {
-    const scheduledUpcoming = selectedSessions
+    const upcomingChargeable = selectedSessions
       .filter(
         (session) =>
-          session.status === "scheduled" &&
           (session.startAt ?? 0) > Date.now() &&
           Math.max(0, Number(session.feePerSessionCents ?? 0)) > 0,
       )
@@ -309,7 +308,7 @@ export default function AdminStudentsPage() {
     const coveredIds = new Set<string>(selectedPaymentCoverage.fullyPaidSessionIds);
 
     // Mark additional sessions covered by remaining credit
-    for (const session of scheduledUpcoming) {
+    for (const session of upcomingChargeable) {
       if (coveredIds.has(session.id)) continue;
       const chargeCents = Math.max(0, Number(session.feePerSessionCents ?? 0));
       if (remainingCredit >= chargeCents) {
@@ -323,16 +322,15 @@ export default function AdminStudentsPage() {
 
   const selectedUpcomingPrepaid = useMemo(() => {
     const nowMs = Date.now();
-    const scheduledUpcoming = selectedSessions
+    const upcomingChargeable = selectedSessions
       .filter(
         (session) =>
-          session.status === "scheduled" &&
           (session.startAt ?? 0) > nowMs &&
           Math.max(0, Number(session.feePerSessionCents ?? 0)) > 0,
       )
       .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0));
 
-    const fullyPaid = scheduledUpcoming.filter((session) =>
+    const fullyPaid = upcomingChargeable.filter((session) =>
       selectedSessionsPrepaidCoverage.has(session.id),
     );
 
@@ -1257,8 +1255,7 @@ export default function AdminStudentsPage() {
                               {s.status.replaceAll("_", " ")}
                               {MISSED_STATUSES.has(s.status) ? " (MISSED)" : ""}
                             </span>
-                            {s.status === "scheduled" &&
-                            selectedSessionsPrepaidCoverage.has(s.id) &&
+                            {selectedSessionsPrepaidCoverage.has(s.id) &&
                             Math.max(0, Number(s.feePerSessionCents ?? 0)) > 0 ? (
                               <span className="status-pill status-attended">already paid</span>
                             ) : null}
