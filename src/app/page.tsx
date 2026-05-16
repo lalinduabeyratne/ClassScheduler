@@ -57,11 +57,11 @@ export default function HomePage() {
                 className="slide-image slide-image-3 h-full w-full object-cover"
               />
             </div>
-            <div className="floating-card floating-card-top">
+            <div className="floating-card floating-card-top hidden md:block">
               <p className="text-xs font-medium text-slate-600 dark:text-slate-400">Current focus</p>
               <p className="text-sm font-semibold">Theory, Paper and Revision</p>
             </div>
-            <div className="floating-card floating-card-bottom">
+            <div className="floating-card floating-card-bottom hidden md:block">
               <p className="text-xs font-medium text-slate-600 dark:text-slate-400">This week</p>
               <p className="text-sm font-semibold">31 classes scheduled this week</p>
             </div>
