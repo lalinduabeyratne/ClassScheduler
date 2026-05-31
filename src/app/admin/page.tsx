@@ -1,6 +1,6 @@
 "use client";
 
-import { addDoc, arrayUnion, collection, deleteDoc, doc, updateDoc } from "firebase/firestore";
+import { addDoc, arrayUnion, collection, deleteDoc, doc, setDoc, updateDoc } from "firebase/firestore";
 import { FirebaseError } from "firebase/app";
 import { getDownloadURL, ref } from "firebase/storage";
 import { useRouter } from "next/navigation";
@@ -16,6 +16,7 @@ import {
   qPendingRescheduleRequests,
   qPaymentsBetween,
   qSessionsBetween,
+  qTimetableSlots,
   qStudents,
 } from "@/lib/firestore/api";
 import { useFirestoreQuery } from "@/lib/firestore/hooks";
@@ -26,6 +27,29 @@ import { getUserRole } from "@/lib/roles/getUserRole";
 function startOfDayMs(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 }
+
+function yyyymmdd(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function parseExceptionDateKey(raw: string) {
+  const match = raw.trim().match(/^(\d{4}-\d{2}-\d{2})\b/);
+  return match?.[1] ?? null;
+}
+
+function slotHasExceptionOnDate(exceptions: string[] | undefined, date: Date) {
+  const dateKey = yyyymmdd(date);
+  return (exceptions ?? []).some((entry) => parseExceptionDateKey(entry) === dateKey);
+}
+
+type TodaySessionItem = Session & {
+  isSynthetic?: boolean;
+  sourceLabel: "Timetable" | "Make-up" | "Manual" | "Reschedule" | "Session";
+  studentName: string;
+};
 
 function formatTime(ms: number) {
   return new Intl.DateTimeFormat("en-LK", {
@@ -179,6 +203,7 @@ export default function AdminPage() {
     [ready],
   );
   const studentsQuery = useMemo(() => (ready ? qStudents() : null), [ready]);
+  const slotsQuery = useMemo(() => (ready ? qTimetableSlots() : null), [ready]);
 
   const { data: todaySessions, loading: todayLoading } = useFirestoreQuery<Session>(todaySessionsQuery);
   const visibleTodaySessions = useMemo(() => todaySessions.filter((session) => !session.deletedAt), [todaySessions]);
@@ -195,6 +220,7 @@ export default function AdminPage() {
     error: pendingReschedulesError,
   } = useFirestoreQuery<Record<string, unknown>>(pendingReschedulesQuery);
   const { data: rawStudents } = useFirestoreQuery<Record<string, unknown>>(studentsQuery);
+  const { data: rawSlots } = useFirestoreQuery<Record<string, unknown>>(slotsQuery);
 
   const students = useMemo(
     () =>
@@ -213,6 +239,111 @@ export default function AdminPage() {
     for (const s of students) m.set(s.id, { id: s.id, fullName: s.fullName });
     return m;
   }, [students]);
+
+  const studentFeeById = useMemo(
+    () => new Map(students.map((student) => [student.id, student.feePerSessionCents])),
+    [students],
+  );
+
+  const timetableSlots = useMemo(
+    () =>
+      rawSlots.map((slot) => ({
+        id: String((slot as any).id),
+        weekday: Number((slot as any).weekday ?? 1),
+        startTime: String((slot as any).startTime ?? "00:00"),
+        endTime: String((slot as any).endTime ?? "00:00"),
+        duration: Number((slot as any).duration ?? (slot as any).durationMin ?? 60),
+        students: Array.isArray((slot as any).students)
+          ? ((slot as any).students as Array<{ id?: unknown; name?: unknown }>)
+              .map((st) => ({
+                id: String(st.id ?? ""),
+                name: String(st.name ?? studentsById.get(String(st.id ?? ""))?.fullName ?? "Student"),
+              }))
+              .filter((st) => st.id)
+          : [],
+        active: Boolean((slot as any).active ?? true),
+        exceptions: Array.isArray((slot as any).exceptions)
+          ? ((slot as any).exceptions as unknown[]).map((entry) => String(entry))
+          : [],
+      })),
+    [rawSlots, studentsById],
+  );
+
+  const sessionBySlotDate = useMemo(() => {
+    const map = new Map<string, Session>();
+    for (const session of todaySessions) {
+      if (!session.slotId) continue;
+      const dateKey = yyyymmdd(new Date(session.startAt));
+      map.set(`${session.slotId}|${session.studentId}|${dateKey}`, session);
+    }
+    return map;
+  }, [todaySessions]);
+
+  const syntheticTodaySessions = useMemo<TodaySessionItem[]>(() => {
+    const targetDate = new Date(todayStart);
+    const dateKey = yyyymmdd(targetDate);
+    const items: TodaySessionItem[] = [];
+
+    for (const slot of timetableSlots) {
+      if (!slot.active) continue;
+      if (slot.weekday !== targetDate.getDay()) continue;
+      if (slotHasExceptionOnDate(slot.exceptions, targetDate)) continue;
+
+      const [startHh, startMm] = slot.startTime.split(":").map(Number);
+      const startAt = new Date(
+        targetDate.getFullYear(),
+        targetDate.getMonth(),
+        targetDate.getDate(),
+        Number.isFinite(startHh) ? startHh : 0,
+        Number.isFinite(startMm) ? startMm : 0,
+      ).getTime();
+      const endAt = startAt + Math.max(1, slot.duration) * 60 * 1000;
+
+      for (const student of slot.students) {
+        if (sessionBySlotDate.has(`${slot.id}|${student.id}|${dateKey}`)) continue;
+        items.push({
+          id: `${slot.id}_${student.id}_${dateKey}__admin-today-synthetic`,
+          studentId: student.id,
+          slotId: slot.id,
+          startAt,
+          endAt,
+          status: "scheduled",
+          feePerSessionCents: Math.max(0, Number(studentFeeById.get(student.id) ?? 0)),
+          chargeCents: 0,
+          createdFrom: "timetable",
+          isSynthetic: true,
+          sourceLabel: "Timetable",
+          studentName: student.name,
+        });
+      }
+    }
+
+    return items.sort((a, b) => a.startAt - b.startAt);
+  }, [sessionBySlotDate, studentFeeById, timetableSlots, todayStart]);
+
+  const displayTodaySessions = useMemo(
+    () =>
+      [
+        ...visibleTodaySessions.map(
+          (session): TodaySessionItem => ({
+            ...session,
+            sourceLabel:
+              session.createdFrom === "makeup"
+                ? "Make-up"
+                : session.createdFrom === "manual"
+                  ? "Manual"
+                  : session.createdFrom === "reschedule"
+                    ? "Reschedule"
+                    : session.createdFrom === "timetable"
+                      ? "Timetable"
+                      : "Session",
+            studentName: studentsById.get(session.studentId)?.fullName ?? session.studentId,
+          }),
+        ),
+        ...syntheticTodaySessions,
+      ].sort((a, b) => a.startAt - b.startAt),
+    [syntheticTodaySessions, studentsById, visibleTodaySessions],
+  );
 
   const sortedPendingReschedules = useMemo(() => {
     return [...pendingReschedules].sort(
@@ -318,25 +449,53 @@ export default function AdminPage() {
   }, [parsedPaymentAmountCents, paymentTargetBalance]);
 
   const lateCancelsToday = useMemo(
-    () => visibleTodaySessions.filter((s) => s.status === "late_cancel").length,
-    [visibleTodaySessions],
+    () => displayTodaySessions.filter((s) => s.status === "late_cancel").length,
+    [displayTodaySessions],
   );
 
-  async function markSessionStatus(session: Session, status: AttendanceStatus) {
+  async function markSessionStatus(session: TodaySessionItem, status: AttendanceStatus) {
     setActionError(null);
-    if (session.feePerSessionCents <= 0) {
+    const targetSession = session.isSynthetic
+      ? await materializeSyntheticTodaySession(session as TodaySessionItem, status)
+      : session;
+    if (targetSession.feePerSessionCents <= 0) {
       setActionError("Cannot calculate fee: this session has no valid base rate.");
       return;
     }
     const chargeCents = computeChargeCents({
-      feePerSessionCents: session.feePerSessionCents,
+      feePerSessionCents: targetSession.feePerSessionCents,
       status,
     });
-    await updateDoc(doc(db, "sessions", session.id), {
+    await updateDoc(doc(db, "sessions", targetSession.id), {
       status,
       chargeCents,
       statusUpdatedAt: Date.now(),
     });
+  }
+
+  async function materializeSyntheticTodaySession(session: TodaySessionItem, status: AttendanceStatus): Promise<Session> {
+    if (!session.isSynthetic) return session;
+    if (!session.slotId) throw new Error("Timetable session is missing slot linkage.");
+
+    const dateKey = yyyymmdd(new Date(session.startAt));
+    const sessionId = `${session.slotId}_${session.studentId}_${dateKey}`;
+    const feePerSessionCents = 0;
+    const chargeCents = computeChargeCents({ feePerSessionCents, status });
+
+    const payload: Omit<Session, "id"> = {
+      studentId: session.studentId,
+      slotId: session.slotId,
+      startAt: session.startAt,
+      endAt: session.endAt,
+      status,
+      statusUpdatedAt: Date.now(),
+      feePerSessionCents,
+      chargeCents,
+      createdFrom: "timetable",
+    };
+
+    await setDoc(doc(db, col.sessions(), sessionId), payload);
+    return { id: sessionId, ...payload };
   }
 
   async function addAdminPayment() {
@@ -602,7 +761,7 @@ export default function AdminPage() {
           Marking status updates financial charge instantly: attended = 100%, tutor cancel = 0%, early cancel = 0%, late cancel = 50%, no show = 100%.
         </div>
         <div className="mt-3 grid gap-3 md:hidden">
-          {visibleTodaySessions.map((s) => (
+          {displayTodaySessions.map((s) => (
             <div key={s.id} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -654,7 +813,7 @@ export default function AdminPage() {
               </div>
             </div>
           ))}
-          {visibleTodaySessions.length === 0 ? (
+          {displayTodaySessions.length === 0 ? (
             <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4 text-sm text-[rgb(var(--muted))]">
               No sessions found for today.
             </div>
@@ -671,7 +830,7 @@ export default function AdminPage() {
               </tr>
             </thead>
             <tbody>
-              {visibleTodaySessions.map((s) => (
+              {displayTodaySessions.map((s) => (
                 <tr key={s.id} className="border-b border-[rgb(var(--border))]">
                   <td className="py-2 pr-3">{formatTime(s.startAt)}</td>
                   <td className="py-2 pr-3">
@@ -715,7 +874,7 @@ export default function AdminPage() {
                   <td className="py-2 pr-3 text-right font-semibold">{formatMoneyLKR(s.chargeCents)}</td>
                 </tr>
               ))}
-              {visibleTodaySessions.length === 0 ? (
+              {displayTodaySessions.length === 0 ? (
                 <tr>
                   <td className="py-6 text-center text-sm text-[rgb(var(--muted))]" colSpan={4}>
                     No sessions found for today.
