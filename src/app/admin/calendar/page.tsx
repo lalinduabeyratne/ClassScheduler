@@ -9,7 +9,7 @@ import { exportTimetableWeeklyReport } from "@/lib/billing/exportPdf";
 import { db } from "@/lib/firebase/client";
 import { useAuthUser } from "@/lib/firebase/useAuthUser";
 import { getUserRole } from "@/lib/roles/getUserRole";
-import { qSessionsBetween } from "@/lib/firestore/api";
+import { qSessionsBetween, qTimetableSlots } from "@/lib/firestore/api";
 import { useFirestoreQuery } from "@/lib/firestore/hooks";
 import { col } from "@/lib/firestore/paths";
 import type { AttendanceStatus, Session } from "@/lib/model/types";
@@ -24,6 +24,21 @@ function yyyymmdd(d: Date) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+function localDateKey(ms: number) {
+  const d = new Date(ms);
+  return yyyymmdd(d);
+}
+
+function parseExceptionDateKey(raw: string) {
+  const match = raw.trim().match(/^(\d{4}-\d{2}-\d{2})\b/);
+  return match?.[1] ?? null;
+}
+
+function slotHasExceptionOnDate(exceptions: string[] | undefined, date: Date) {
+  const dateKey = yyyymmdd(date);
+  return (exceptions ?? []).some((entry) => parseExceptionDateKey(entry) === dateKey);
 }
 
 function weekBoundsFromDateValue(dateValue: string) {
@@ -89,14 +104,86 @@ function minutesFromDayStart(ms: number) {
 
 type SlotGroupLayout = {
   key: string;
-  sessions: Session[];
+  sessions: CalendarItem[];
   startMinutes: number;
   endMinutes: number;
   lane: number;
   laneCount: number;
 };
 
-function computeSlotGroupLayouts(slotGroups: Array<{ key: string; sessions: Session[] }>) {
+type CalendarSlotStudent = {
+  id: string;
+  name: string;
+};
+
+type CalendarSlot = {
+  id: string;
+  day: string;
+  weekday: number;
+  startTime: string;
+  endTime: string;
+  duration: number;
+  students: CalendarSlotStudent[];
+  active: boolean;
+  exceptions: string[];
+};
+
+type CalendarItem = Session & {
+  isSynthetic?: boolean;
+  sourceLabel: "Timetable" | "Make-up" | "Manual" | "Reschedule" | "Session";
+  studentName: string;
+};
+
+function toCalendarItem(session: Session, studentName: string): CalendarItem {
+  return {
+    ...session,
+    studentName,
+    sourceLabel:
+      session.createdFrom === "makeup"
+        ? "Make-up"
+        : session.createdFrom === "manual"
+          ? "Manual"
+          : session.createdFrom === "reschedule"
+            ? "Reschedule"
+            : session.createdFrom === "timetable"
+              ? "Timetable"
+              : "Session",
+  };
+}
+
+function buildSyntheticTimetableItem(args: {
+  slot: CalendarSlot;
+  student: CalendarSlotStudent;
+  dateMs: number;
+  startAt: number;
+  endAt: number;
+  feePerSessionCents: number;
+}): CalendarItem {
+  return {
+    id: `${args.slot.id}_${args.student.id}_${localDateKey(args.dateMs)}__calendar-synthetic`,
+    studentId: args.student.id,
+    slotId: args.slot.id,
+    startAt: args.startAt,
+    endAt: args.endAt,
+    status: "scheduled",
+    feePerSessionCents: args.feePerSessionCents,
+    chargeCents: 0,
+    createdFrom: "timetable",
+    sourceLabel: "Timetable",
+    studentName: args.student.name,
+    isSynthetic: true,
+  };
+}
+
+function calendarGroupKey(session: CalendarItem) {
+  // Only timetable slot-mates should be merged into one visual block.
+  if (session.createdFrom === "timetable" && session.slotId) {
+    return `slot:${session.slotId}:${session.startAt}-${session.endAt}`;
+  }
+  return `session:${session.id}`;
+}
+
+function computeSlotGroupLayouts(slotGroups: Array<{ key: string; sessions: CalendarItem[] }>) {
   const intervals = slotGroups
     .map((group) => {
       const first = group.sessions[0];
@@ -106,7 +193,7 @@ function computeSlotGroupLayouts(slotGroups: Array<{ key: string; sessions: Sess
       if (endMinutes <= startMinutes) endMinutes += 24 * 60;
       return { ...group, startMinutes, endMinutes };
     })
-    .filter((v): v is { key: string; sessions: Session[]; startMinutes: number; endMinutes: number } => Boolean(v))
+    .filter((v): v is { key: string; sessions: CalendarItem[]; startMinutes: number; endMinutes: number } => Boolean(v))
     .sort((a, b) => a.startMinutes - b.startMinutes);
 
   const laneEndTimes: number[] = [];
@@ -222,12 +309,108 @@ export default function AdminCalendarPage() {
     [endMs, ready, startMs],
   );
   const { data: sessions } = useFirestoreQuery<Session>(sessionsQuery);
+  const slotsQuery = useMemo(() => (ready ? qTimetableSlots() : null), [ready]);
+  const { data: rawSlots } = useFirestoreQuery<Record<string, unknown>>(slotsQuery);
   const weeklyReportQuery = useMemo(
     () => (ready ? qSessionsBetween({ startAtMs: reportRange.startMs, endAtMs: reportRange.endMs }) : null),
     [ready, reportRange.endMs, reportRange.startMs],
   );
   const { data: weeklyReportSessions } = useFirestoreQuery<Session>(weeklyReportQuery);
   const { students, byId: studentsById } = useStudentsMap(ready);
+
+  const timetableSlots: CalendarSlot[] = useMemo(
+    () =>
+      rawSlots.map((slot) => ({
+        id: String((slot as any).id),
+        day: String((slot as any).day ?? "Monday"),
+        weekday: Number((slot as any).weekday ?? 1),
+        startTime: String((slot as any).startTime ?? "00:00"),
+        endTime: String((slot as any).endTime ?? "00:00"),
+        duration: Number((slot as any).duration ?? (slot as any).durationMin ?? 60),
+        students: Array.isArray((slot as any).students)
+          ? ((slot as any).students as Array<{ id?: unknown; name?: unknown }>)
+              .map((st) => ({
+                id: String(st.id ?? ""),
+                name: String(st.name ?? studentsById.get(String(st.id ?? ""))?.fullName ?? "Student"),
+              }))
+              .filter((st) => st.id)
+          : [],
+        active: Boolean((slot as any).active ?? true),
+        exceptions: Array.isArray((slot as any).exceptions)
+          ? ((slot as any).exceptions as unknown[]).map((entry) => String(entry))
+          : [],
+      })),
+    [rawSlots, studentsById],
+  );
+
+  const sessionsBySlotDate = useMemo(() => {
+    const map = new Map<string, Session>();
+    for (const session of sessions) {
+      if (!session.slotId) continue;
+      map.set(`${session.slotId}|${session.studentId}|${localDateKey(session.startAt)}`, session);
+    }
+    return map;
+  }, [sessions]);
+
+  const calendarDays = useMemo(() => {
+    const days: Array<{ key: string; dateMs: number; sessions: CalendarItem[] }> = [];
+
+    for (let i = 0; i < rangeDays; i += 1) {
+      const dateMs = startMs + i * 24 * 60 * 60 * 1000;
+      const date = new Date(dateMs);
+      const key = new Date(dateMs).toDateString();
+      const daySessions = sessions.filter((session) => new Date(session.startAt).toDateString() === key);
+      const items: CalendarItem[] = [];
+
+      for (const session of daySessions) {
+        const studentName = studentsById.get(session.studentId)?.fullName ?? session.studentId;
+        items.push(toCalendarItem(session, studentName));
+      }
+
+      for (const slot of timetableSlots) {
+        if (!slot.active) continue;
+        if (slot.weekday !== date.getDay()) continue;
+        if (slotHasExceptionOnDate(slot.exceptions, date)) continue;
+        if (slot.students.length === 0) continue;
+
+        const startAt = new Date(
+          date.getFullYear(),
+          date.getMonth(),
+          date.getDate(),
+          Number(slot.startTime.split(":")[0] ?? 0),
+          Number(slot.startTime.split(":")[1] ?? 0),
+        ).getTime();
+        const endAt = new Date(
+          date.getFullYear(),
+          date.getMonth(),
+          date.getDate(),
+          Number(slot.endTime.split(":")[0] ?? 0),
+          Number(slot.endTime.split(":")[1] ?? 0),
+        ).getTime();
+
+        for (const student of slot.students) {
+          const existing = sessionsBySlotDate.get(`${slot.id}|${student.id}|${localDateKey(dateMs)}`);
+          if (existing) continue;
+
+          items.push(
+            buildSyntheticTimetableItem({
+              slot,
+              student,
+              dateMs,
+              startAt,
+              endAt,
+              feePerSessionCents: 0,
+            }),
+          );
+        }
+      }
+
+      items.sort((a, b) => a.startAt - b.startAt);
+      days.push({ key, dateMs, sessions: items });
+    }
+
+    return days;
+  }, [rangeDays, sessions, sessionsBySlotDate, startMs, studentsById, timetableSlots]);
 
   const filteredSessions = useMemo(() => {
     return sessions.filter((session) => {
@@ -237,29 +420,14 @@ export default function AdminCalendarPage() {
     });
   }, [sessions, statusFilter, studentFilter]);
 
-  const grouped = useMemo(() => {
-    const m = new Map<string, Session[]>();
-    for (const s of filteredSessions) {
-      const key = new Date(s.startAt).toDateString();
-      m.set(key, [...(m.get(key) ?? []), s]);
-    }
-    return m;
-  }, [filteredSessions]);
-
-  const calendarDays = useMemo(() => {
-    const days: Array<{ key: string; dateMs: number; sessions: Session[] }> = [];
-    for (let i = 0; i < rangeDays; i += 1) {
-      const dateMs = startMs + i * 24 * 60 * 60 * 1000;
-      const key = new Date(dateMs).toDateString();
-      const sessionsForDay = [...(grouped.get(key) ?? [])].sort((a, b) => a.startAt - b.startAt);
-      days.push({ key, dateMs, sessions: sessionsForDay });
-    }
-    return days;
-  }, [grouped, rangeDays, startMs]);
-
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeSessionId) ?? null,
     [activeSessionId, sessions],
+  );
+
+  const activeCalendarItem = useMemo(
+    () => calendarDays.flatMap((day) => day.sessions).find((item) => item.id === activeSessionId) ?? null,
+    [activeSessionId, calendarDays],
   );
 
   const viewEndHour = useMemo(() => {
@@ -336,6 +504,37 @@ export default function AdminCalendarPage() {
   async function deleteSession(sessionId: string) {
     if (!window.confirm("Delete this session record?")) return;
     setActionError(null);
+    const session = sessions.find((s) => s.id === sessionId) ?? null;
+
+    const staleCoverupLinks = await getDocs(
+      query(collection(db, col.sessions()), where("coverupSessionId", "==", sessionId)),
+    );
+
+    for (const snap of staleCoverupLinks.docs) {
+      await updateDoc(doc(db, col.sessions(), snap.id), {
+        coverupStatus: null,
+        coverupSessionId: null,
+        coverupScheduledFor: null,
+        coverupScheduledAt: null,
+        coverupCompletedAt: null,
+      });
+    }
+
+    if (session?.createdFromSessionId) {
+      try {
+        await updateDoc(doc(db, col.sessions(), session.createdFromSessionId), {
+          coverupStatus: null,
+          coverupSessionId: null,
+          coverupScheduledFor: null,
+          coverupScheduledAt: null,
+          coverupCompletedAt: null,
+        });
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : "Failed to detach linked make-up session.");
+        return;
+      }
+    }
+
     await deleteDoc(doc(db, col.sessions(), sessionId));
   }
 
@@ -559,7 +758,7 @@ export default function AdminCalendarPage() {
 
       {calendarDays.every((d) => d.sessions.length === 0) ? (
         <div className="card p-6 text-sm text-[rgb(var(--muted))]">
-          No sessions in this filtered range.
+          No timetable or session entries in this filtered range.
         </div>
       ) : (
         <>
@@ -571,7 +770,7 @@ export default function AdminCalendarPage() {
                     <div className="text-sm font-semibold">
                       {new Intl.DateTimeFormat("en-LK", { weekday: "long", month: "short", day: "2-digit" }).format(new Date(day.dateMs))}
                     </div>
-                    <div className="text-xs text-[rgb(var(--muted))]">{day.sessions.length} session{day.sessions.length === 1 ? "" : "s"}</div>
+                    <div className="text-xs text-[rgb(var(--muted))]">{day.sessions.length} item{day.sessions.length === 1 ? "" : "s"}</div>
                   </div>
                   <div className="mt-3 space-y-2">
                     {day.sessions.length === 0 ? (
@@ -580,9 +779,9 @@ export default function AdminCalendarPage() {
                       </div>
                     ) : (
                       (() => {
-                        const slotGroups = new Map<string, Session[]>();
+                        const slotGroups = new Map<string, CalendarItem[]>();
                         for (const session of day.sessions) {
-                          const key = `${session.startAt}-${session.endAt}`;
+                          const key = calendarGroupKey(session);
                           slotGroups.set(key, [...(slotGroups.get(key) ?? []), session]);
                         }
 
@@ -591,7 +790,7 @@ export default function AdminCalendarPage() {
                           const allSameStatus = group.every((s) => s.status === first.status);
                           const blockStatus: AttendanceStatus | "scheduled" = allSameStatus ? first.status : "scheduled";
                           const displayNames = group
-                            .map((s) => studentsById.get(s.studentId)?.fullName ?? s.studentId)
+                            .map((s) => s.studentName ?? studentsById.get(s.studentId)?.fullName ?? s.studentId)
                             .join(", ");
 
                           return (
@@ -675,9 +874,9 @@ export default function AdminCalendarPage() {
                       />
                     ))}
                     {(() => {
-                      const slotGroups = new Map<string, Session[]>();
+                      const slotGroups = new Map<string, CalendarItem[]>();
                       for (const session of day.sessions) {
-                        const key = `${session.startAt}-${session.endAt}`;
+                        const key = calendarGroupKey(session);
                         slotGroups.set(key, [...(slotGroups.get(key) ?? []), session]);
                       }
 
@@ -700,7 +899,7 @@ export default function AdminCalendarPage() {
                         const allSameStatus = slotSessions.every((s) => s.status === first.status);
                         const blockStatus = allSameStatus ? first.status : "scheduled";
                         const displayNames = slotSessions
-                          .map((s) => studentsById.get(s.studentId)?.fullName ?? s.studentId)
+                          .map((s) => s.studentName ?? studentsById.get(s.studentId)?.fullName ?? s.studentId)
                           .join(", ");
 
                         return (
@@ -738,21 +937,21 @@ export default function AdminCalendarPage() {
         </>
       )}
 
-      {activeSession ? (
+      {activeCalendarItem ? (
         <div className="admin-cal-modal-backdrop" onClick={() => setActiveSessionId(null)}>
           <div className="admin-cal-modal card p-4 md:p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold">
-                  {studentsById.get(activeSession.studentId)?.fullName ?? activeSession.studentId}
+                  {activeCalendarItem.studentName ?? studentsById.get(activeCalendarItem.studentId)?.fullName ?? activeCalendarItem.studentId}
                 </div>
                 <div className="text-xs text-[rgb(var(--muted))]">
-                  {dayLabel(activeSession.startAt)} • {timeLabel(activeSession.startAt)} -{" "}
-                  {timeLabel(activeSession.endAt)}
+                  {dayLabel(activeCalendarItem.startAt)} • {timeLabel(activeCalendarItem.startAt)} -{" "}
+                  {timeLabel(activeCalendarItem.endAt)}
                 </div>
                 <div className="mt-2">
-                  <span className={`status-pill ${eventStatusClass(activeSession.status)}`}>
-                    {statusLabel(activeSession.status)}
+                  <span className={`status-pill ${eventStatusClass(activeCalendarItem.status)}`}>
+                    {statusLabel(activeCalendarItem.status)}
                   </span>
                 </div>
                 <div className="mt-2 text-xs text-[rgb(var(--muted))]">
@@ -760,7 +959,10 @@ export default function AdminCalendarPage() {
                     style: "currency",
                     currency: "LKR",
                     maximumFractionDigits: 2,
-                  }).format((activeSession.chargeCents ?? 0) / 100)}
+                  }).format((activeCalendarItem.chargeCents ?? 0) / 100)}
+                </div>
+                <div className="mt-1 text-[11px] uppercase tracking-wide text-[rgb(var(--muted))]">
+                  {activeCalendarItem.sourceLabel}
                 </div>
               </div>
               <button className="btn btn-ghost text-xs" onClick={() => setActiveSessionId(null)}>
@@ -769,14 +971,16 @@ export default function AdminCalendarPage() {
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
-              {activeSession.startAt > Date.now() ? (
+              {activeCalendarItem.isSynthetic ? (
+                <div className="input min-w-[150px] text-center text-xs">timetable</div>
+              ) : activeCalendarItem.startAt > Date.now() ? (
                 <div className="input min-w-[150px] text-center text-xs">scheduled</div>
               ) : (
                 <select
                   className="input min-w-[150px] text-xs"
-                  value={activeSession.status === "scheduled" ? "attended" : activeSession.status}
+                  value={activeCalendarItem.status === "scheduled" ? "attended" : activeCalendarItem.status}
                   onChange={(e) =>
-                    void updateSessionStatus(activeSession, e.target.value as AttendanceStatus)
+                    void updateSessionStatus(activeCalendarItem, e.target.value as AttendanceStatus)
                   }
                 >
                   <option value="attended">Attended</option>
@@ -786,16 +990,20 @@ export default function AdminCalendarPage() {
                   <option value="no_show">No show</option>
                 </select>
               )}
-              <button className="btn btn-ghost text-xs" onClick={() => openEditTime(activeSession)}>
-                Edit time
-              </button>
-              <button className="btn btn-ghost text-xs" onClick={() => void deleteSession(activeSession.id)}>
-                Delete session
-              </button>
-              {activeSession.slotId ? (
+              {!activeCalendarItem.isSynthetic ? (
+                <>
+                  <button className="btn btn-ghost text-xs" onClick={() => openEditTime(activeCalendarItem)}>
+                    Edit time
+                  </button>
+                  <button className="btn btn-ghost text-xs" onClick={() => void deleteSession(activeCalendarItem.id)}>
+                    Delete session
+                  </button>
+                </>
+              ) : null}
+              {activeCalendarItem.slotId ? (
                 <button
                   className="btn btn-ghost text-xs"
-                  onClick={() => void deleteLinkedSlot(String(activeSession.slotId))}
+                  onClick={() => void deleteLinkedSlot(String(activeCalendarItem.slotId))}
                 >
                   Delete slot
                 </button>

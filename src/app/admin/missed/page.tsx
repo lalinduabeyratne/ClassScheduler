@@ -107,6 +107,13 @@ export default function AdminMissedPage() {
       setActionError("Select at least one missed session.");
       return;
     }
+    const eligibleSessions = selectedSessions.filter(
+      (s) => !s.coverupStatus || (s.coverupStatus !== "scheduled" && s.coverupStatus !== "completed"),
+    );
+    if (eligibleSessions.length === 0) {
+      setActionError("Selected sessions already have make-up coverage.");
+      return;
+    }
     const duration = Math.trunc(Number(makeupDurationMin));
     if (!Number.isFinite(duration) || duration <= 0) {
       setActionError("Enter a valid duration in minutes.");
@@ -114,7 +121,7 @@ export default function AdminMissedPage() {
     }
 
     try {
-      for (const s of selectedSessions) {
+      for (const s of eligibleSessions) {
         const startAt = combineDateTimeMs(makeupDate, makeupTime);
         const docRef = await addDoc(collection(db, col.sessions()), {
           studentId: s.studentId,
@@ -153,13 +160,23 @@ export default function AdminMissedPage() {
 
   async function markAsMadeUp(session: Session) {
     try {
-      await updateDoc(doc(db, "sessions", session.id), {
+      const updatePayload: Record<string, unknown> = {
         status: "attended",
         chargeCents: session.feePerSessionCents ?? 0,
         statusUpdatedAt: Date.now(),
         coverupStatus: "completed",
         coverupCompletedAt: Date.now(),
-      });
+      };
+
+      await updateDoc(doc(db, "sessions", session.id), updatePayload);
+
+      if (session.coverupSessionId) {
+        await updateDoc(doc(db, "sessions", session.coverupSessionId), {
+          status: "attended",
+          chargeCents: session.feePerSessionCents ?? 0,
+          statusUpdatedAt: Date.now(),
+        });
+      }
     } catch (err) {
       console.error(err);
     }
@@ -169,6 +186,9 @@ export default function AdminMissedPage() {
     const ok = window.confirm("Delete this session? This cannot be undone.");
     if (!ok) return;
     try {
+      if (session.coverupSessionId) {
+        await deleteDoc(doc(db, "sessions", session.coverupSessionId));
+      }
       await deleteDoc(doc(db, "sessions", session.id));
     } catch (err) {
       console.error(err);

@@ -346,6 +346,59 @@ export default function AdminStudentsPage() {
     },
     [selectedSessions],
   );
+  const selectedSessionsById = useMemo(() => new Map(selectedSessions.map((session) => [session.id, session])), [selectedSessions]);
+  const selectedAttendanceView = useMemo(() => {
+    return selectedAttendance.map((session) => {
+      const linkedMakeupExists = selectedSessions.some((candidate) => {
+        if (candidate.createdFrom !== "makeup") return false;
+        if (candidate.startAt !== session.coverupScheduledFor) return false;
+        if (session.coverupSessionId && candidate.id !== session.coverupSessionId) return false;
+        if (candidate.createdFromSessionId && candidate.createdFromSessionId !== session.id) return false;
+        return true;
+      });
+      if (session.coverupStatus === "scheduled" && !linkedMakeupExists) {
+        return {
+          ...session,
+          coverupStatus: undefined,
+          coverupSessionId: undefined,
+          coverupScheduledFor: undefined,
+          coverupScheduledAt: undefined,
+        };
+      }
+      return session;
+    });
+  }, [selectedAttendance, selectedSessionsById]);
+
+  useEffect(() => {
+    if (!selectedStudentId || selectedSessions.length === 0) return;
+
+    const staleCoverups = selectedSessions.filter(
+      (session) =>
+        session.coverupStatus === "scheduled" &&
+        !selectedSessions.some((candidate) => {
+          if (candidate.createdFrom !== "makeup") return false;
+          if (candidate.startAt !== session.coverupScheduledFor) return false;
+          if (session.coverupSessionId && candidate.id !== session.coverupSessionId) return false;
+          if (candidate.createdFromSessionId && candidate.createdFromSessionId !== session.id) return false;
+          return true;
+        }),
+    );
+
+    if (staleCoverups.length === 0) return;
+
+    void Promise.all(
+      staleCoverups.map((session) =>
+        updateDoc(doc(db, col.sessions(), session.id), {
+          coverupStatus: null,
+          coverupSessionId: null,
+          coverupScheduledFor: null,
+          coverupScheduledAt: null,
+        }),
+      ),
+    ).catch((err) => {
+      console.error("Failed to clear stale make-up links", err);
+    });
+  }, [selectedSessions, selectedSessionsById, selectedStudentId]);
 
   const selectedMissedSummary = useMemo(() => {
     const missedSessions = selectedSessions.filter((s) => MISSED_STATUSES.has(s.status));
@@ -1246,7 +1299,7 @@ export default function AdminStudentsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {selectedAttendance.map((s) => (
+                    {selectedAttendanceView.map((s) => (
                       <tr key={s.id} className={`border-b border-[rgb(var(--border))] ${MISSED_STATUSES.has(s.status) ? "bg-rose-500/10" : ""}`}>
                         <td className="py-2 pr-3">{new Date(s.startAt).toLocaleString()}</td>
                         <td className="py-2 pr-3">
@@ -1262,7 +1315,7 @@ export default function AdminStudentsPage() {
                           </div>
                         </td>
                         <td className="py-2 pr-3">
-                          {s.coverupStatus === "scheduled" ? (
+                          {s.coverupStatus === "scheduled" && s.coverupSessionId && selectedSessionsById.has(s.coverupSessionId) ? (
                             <div className="space-y-0.5">
                               <div className="text-emerald-600 dark:text-emerald-400 font-medium">Scheduled</div>
                               <div className="text-emerald-600/70 dark:text-emerald-400/70 text-xs">{new Date(s.coverupScheduledFor ?? 0).toLocaleString()}</div>

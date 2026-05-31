@@ -1,13 +1,13 @@
 "use client";
 
-import { addDoc, collection, deleteDoc, doc, updateDoc } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AdminTopNav } from "@/app/admin/_components/AdminTopNav";
 import { computeChargeCents } from "@/lib/billing/fee";
 import { db } from "@/lib/firebase/client";
 import { useAuthUser } from "@/lib/firebase/useAuthUser";
-import { qSessionsBetween, qStudents } from "@/lib/firestore/api";
+import { qSessionsBetween, qStudents, qTimetableSlots } from "@/lib/firestore/api";
 import { useFirestoreQuery } from "@/lib/firestore/hooks";
 import { col } from "@/lib/firestore/paths";
 import type { AttendanceStatus, Session } from "@/lib/model/types";
@@ -35,6 +35,56 @@ function formatMoneyLKR(cents: number) {
 
 function combineDateTimeMs(dateValue: string, timeValue: string) {
   return new Date(`${dateValue}T${timeValue}:00`).getTime();
+}
+
+function yyyymmdd(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function parseExceptionDateKey(raw: string) {
+  const match = raw.trim().match(/^(\d{4}-\d{2}-\d{2})\b/);
+  return match?.[1] ?? null;
+}
+
+function slotHasExceptionOnDate(exceptions: string[], date: Date) {
+  const dateKey = yyyymmdd(date);
+  return exceptions.some((entry) => parseExceptionDateKey(entry) === dateKey);
+}
+
+type SessionListItem = Session & {
+  isSynthetic?: boolean;
+  sourceLabel: "Session" | "Make-up" | "Manual" | "Reschedule" | "Timetable";
+  studentName: string;
+};
+
+type TimetableSlotRow = {
+  id: string;
+  day: string;
+  weekday: number;
+  startTime: string;
+  endTime: string;
+  duration: number;
+  students: Array<{ id: string; name: string }>;
+  active: boolean;
+  exceptions: string[];
+};
+
+function toSessionListItem(session: Session, studentName: string): SessionListItem {
+  return {
+    ...session,
+    studentName,
+    sourceLabel:
+      session.createdFrom === "makeup"
+        ? "Make-up"
+        : session.createdFrom === "manual"
+          ? "Manual"
+          : session.createdFrom === "reschedule"
+            ? "Reschedule"
+            : "Session",
+  };
 }
 
 function statusClass(active: boolean, status: AttendanceStatus) {
@@ -160,9 +210,11 @@ export default function AdminSessionsHistoryPage() {
     [range.endAtMs, range.startAtMs, ready],
   );
   const studentsQuery = useMemo(() => (ready ? qStudents() : null), [ready]);
+  const slotsQuery = useMemo(() => (ready ? qTimetableSlots() : null), [ready]);
 
   const { data: sessions, loading: sessionsLoading } = useFirestoreQuery<Session>(sessionsQuery);
   const { data: students } = useFirestoreQuery<Record<string, unknown>>(studentsQuery);
+  const { data: rawSlots } = useFirestoreQuery<Record<string, unknown>>(slotsQuery);
   const { byId: studentsById } = useStudentsMap(ready);
 
   const studentRows = useMemo(
@@ -186,6 +238,10 @@ export default function AdminSessionsHistoryPage() {
   const selectedStudent = useMemo(
     () => studentRows.find((student) => student.id === newSessionStudentId) ?? null,
     [newSessionStudentId, studentRows],
+  );
+  const studentFeeById = useMemo(
+    () => new Map(studentRows.map((student) => [student.id, student.feePerSessionCents])),
+    [studentRows],
   );
 
   const selectedBackfillDates = useMemo(
@@ -219,6 +275,97 @@ export default function AdminSessionsHistoryPage() {
       : sessions.filter((session) => session.studentId === studentFilter);
     return [...byStudent].sort((a, b) => b.startAt - a.startAt);
   }, [sessions, studentFilter]);
+
+  const timetableSlots = useMemo<TimetableSlotRow[]>(
+    () =>
+      rawSlots.map((slot) => ({
+        id: String((slot as any).id),
+        day: String((slot as any).day ?? "Monday"),
+        weekday: Number((slot as any).weekday ?? 1),
+        startTime: String((slot as any).startTime ?? "00:00"),
+        endTime: String((slot as any).endTime ?? "00:00"),
+        duration: Number((slot as any).duration ?? (slot as any).durationMin ?? 60),
+        students: Array.isArray((slot as any).students)
+          ? ((slot as any).students as Array<{ id?: unknown; name?: unknown }>)
+              .map((st) => ({
+                id: String(st.id ?? ""),
+                name: String(st.name ?? studentsById.get(String(st.id ?? ""))?.fullName ?? "Student"),
+              }))
+              .filter((st) => st.id)
+          : [],
+        active: Boolean((slot as any).active ?? true),
+        exceptions: Array.isArray((slot as any).exceptions)
+          ? ((slot as any).exceptions as unknown[]).map((x) => String(x))
+          : [],
+      })),
+    [rawSlots, studentsById],
+  );
+
+  const sessionBySlotStudentDate = useMemo(() => {
+    const map = new Map<string, Session>();
+    for (const session of sessions) {
+      if (!session.slotId) continue;
+      const dateKey = yyyymmdd(new Date(session.startAt));
+      map.set(`${session.slotId}|${session.studentId}|${dateKey}`, session);
+    }
+    return map;
+  }, [sessions]);
+
+  const syntheticTimetableSessions = useMemo<SessionListItem[]>(() => {
+    if (dateScope !== "day") return [];
+
+    const targetDate = new Date(`${selectedDate}T00:00:00`);
+    if (Number.isNaN(targetDate.getTime())) return [];
+    const targetWeekday = targetDate.getDay();
+    const dateKey = yyyymmdd(targetDate);
+
+    const items: SessionListItem[] = [];
+
+    for (const slot of timetableSlots) {
+      if (!slot.active) continue;
+      if (slot.weekday !== targetWeekday) continue;
+      if (slotHasExceptionOnDate(slot.exceptions, targetDate)) continue;
+
+      const [startHh, startMm] = slot.startTime.split(":").map(Number);
+      const startAt = new Date(
+        targetDate.getFullYear(),
+        targetDate.getMonth(),
+        targetDate.getDate(),
+        Number.isFinite(startHh) ? startHh : 0,
+        Number.isFinite(startMm) ? startMm : 0,
+      ).getTime();
+      const endAt = startAt + Math.max(1, slot.duration) * 60 * 1000;
+
+      for (const student of slot.students) {
+        if (studentFilter !== "all" && student.id !== studentFilter) continue;
+        if (sessionBySlotStudentDate.has(`${slot.id}|${student.id}|${dateKey}`)) continue;
+
+        items.push({
+          id: `${slot.id}_${student.id}_${dateKey}__sessions-synthetic`,
+          studentId: student.id,
+          slotId: slot.id,
+          startAt,
+          endAt,
+          status: "scheduled",
+          feePerSessionCents: 0,
+          chargeCents: 0,
+          createdFrom: "timetable",
+          isSynthetic: true,
+          sourceLabel: "Timetable",
+          studentName: student.name,
+        });
+      }
+    }
+
+    return items.sort((a, b) => b.startAt - a.startAt);
+  }, [dateScope, selectedDate, timetableSlots, studentFilter, sessionBySlotStudentDate]);
+
+  const displaySessions = useMemo<SessionListItem[]>(() => {
+    const real = filteredSessions.map((session) =>
+      toSessionListItem(session, studentsById.get(session.studentId)?.fullName ?? session.studentId),
+    );
+    return [...real, ...syntheticTimetableSessions].sort((a, b) => b.startAt - a.startAt);
+  }, [filteredSessions, studentsById, syntheticTimetableSessions]);
 
   useEffect(() => {
     return () => {
@@ -265,6 +412,48 @@ export default function AdminSessionsHistoryPage() {
       prevChargeCents: session.chargeCents,
       timeoutId,
     });
+  }
+
+  async function materializeSyntheticSession(session: SessionListItem, status: AttendanceStatus): Promise<Session> {
+    if (!session.isSynthetic) return session;
+    if (!session.slotId) {
+      throw new Error("Timetable session is missing slot linkage.");
+    }
+
+    const dateKey = yyyymmdd(new Date(session.startAt));
+    const sessionId = `${session.slotId}_${session.studentId}_${dateKey}`;
+    const feePerSessionCents = Math.max(0, Number(studentFeeById.get(session.studentId) ?? 0));
+    const chargeCents = computeChargeCents({ feePerSessionCents, status });
+
+    const payload: Omit<Session, "id"> = {
+      studentId: session.studentId,
+      slotId: session.slotId,
+      startAt: session.startAt,
+      endAt: session.endAt,
+      status,
+      statusUpdatedAt: Date.now(),
+      feePerSessionCents,
+      chargeCents,
+      createdFrom: "timetable",
+      ...(session.notes ? { notes: session.notes } : {}),
+    };
+
+    await setDoc(doc(db, col.sessions(), sessionId), payload);
+    return { id: sessionId, ...payload };
+  }
+
+  async function updateStatusForRow(session: SessionListItem, status: AttendanceStatus) {
+    setActionError(null);
+    try {
+      const targetSession = session.isSynthetic
+        ? await materializeSyntheticSession(session, status)
+        : session;
+      if (!session.isSynthetic) {
+        await updateStatus(targetSession, status);
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to update session status.");
+    }
   }
 
   function openEdit(session: Session) {
@@ -406,6 +595,36 @@ export default function AdminSessionsHistoryPage() {
       return;
     }
     setActionError(null);
+
+    const staleCoverupLinks = await getDocs(
+      query(collection(db, col.sessions()), where("coverupSessionId", "==", session.id)),
+    );
+
+    for (const snap of staleCoverupLinks.docs) {
+      await updateDoc(doc(db, col.sessions(), snap.id), {
+        coverupStatus: null,
+        coverupSessionId: null,
+        coverupScheduledFor: null,
+        coverupScheduledAt: null,
+        coverupCompletedAt: null,
+      });
+    }
+
+    if (session.createdFromSessionId) {
+      try {
+        await updateDoc(doc(db, col.sessions(), session.createdFromSessionId), {
+          coverupStatus: null,
+          coverupSessionId: null,
+          coverupScheduledFor: null,
+          coverupScheduledAt: null,
+          coverupCompletedAt: null,
+        });
+        await deleteDoc(doc(db, col.sessions(), session.id));
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : "Failed to delete session.");
+      }
+      return;
+    }
 
     const timeoutId = setTimeout(async () => {
       try {
@@ -673,7 +892,7 @@ export default function AdminSessionsHistoryPage() {
             </select>
           </div>
           <div className="text-xs text-[rgb(var(--muted))]">
-            Sessions found: {sessionsLoading ? "..." : filteredSessions.length}
+            Sessions found: {sessionsLoading ? "..." : displaySessions.length}
           </div>
         </div>
       </div>
@@ -707,9 +926,9 @@ export default function AdminSessionsHistoryPage() {
           {dateScope === "all" ? "Sessions on all dates" : `Sessions on ${selectedDate}`}
         </div>
         <div className="mt-3 grid gap-3 md:hidden">
-          {filteredSessions.map((session) => {
+          {displaySessions.map((session) => {
             const sessionDate = new Date(session.startAt);
-            const studentName = studentsById.get(session.studentId)?.fullName ?? session.studentId;
+            const studentName = session.studentName;
 
             return (
               <div key={session.id} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4">
@@ -739,6 +958,7 @@ export default function AdminSessionsHistoryPage() {
                   <span className={`status-pill ${session.status === "scheduled" ? "status-scheduled" : session.status === "attended" ? "status-attended" : session.status === "tutor_cancel" ? "status-tutor-cancel" : session.status === "late_cancel" ? "status-late-cancel" : session.status === "early_cancel" ? "status-early-cancel" : "status-no-show"}`}>
                     {statusLabel(session.status)}
                   </span>
+                  <span className="status-pill status-scheduled">{session.sourceLabel}</span>
                 </div>
 
                 <div className="mt-4 grid gap-2">
@@ -747,28 +967,34 @@ export default function AdminSessionsHistoryPage() {
                       <button
                         key={status}
                         className={`btn btn-sm px-2 py-1 text-xs flex-shrink-0 ${statusClass(session.status === status, status)}`}
-                        onClick={() => void updateStatus(session, status)}
+                        onClick={() => void updateStatusForRow(session, status)}
                       >
                         {statusLabel(status)}
                       </button>
                     ))}
                   </div>
-                  <div className="mt-2 flex gap-2">
-                    <button className="btn" onClick={() => openEdit(session)}>Edit</button>
-                    <button
-                      className="btn btn-ghost"
-                      onClick={() => void deleteSession(session)}
-                      disabled={pendingDelete?.session.id === session.id}
-                    >
-                      {pendingDelete?.session.id === session.id ? 'Pending...' : 'Delete session'}
-                    </button>
-                  </div>
+                  {session.isSynthetic ? (
+                    <div className="text-xs text-[rgb(var(--muted))]">
+                      Generated from timetable. Status click will create an actual session record.
+                    </div>
+                  ) : (
+                    <div className="mt-2 flex gap-2">
+                      <button className="btn" onClick={() => openEdit(session)}>Edit</button>
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => void deleteSession(session)}
+                        disabled={pendingDelete?.session.id === session.id}
+                      >
+                        {pendingDelete?.session.id === session.id ? 'Pending...' : 'Delete session'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             );
           })}
 
-          {!sessionsLoading && filteredSessions.length === 0 ? (
+          {!sessionsLoading && displaySessions.length === 0 ? (
             <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4 text-center text-sm text-[rgb(var(--muted))]">
               <div>No sessions found for this filter.</div>
               <div className="mt-2">
@@ -798,13 +1024,13 @@ export default function AdminSessionsHistoryPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredSessions.map((session) => (
+              {displaySessions.map((session) => (
                 <tr key={session.id} className="border-b border-[rgb(var(--border))]">
                   <td className="py-2 pr-3">{new Date(session.startAt).toLocaleDateString()}</td>
                   <td className="py-2 pr-3">{new Date(session.startAt).toLocaleTimeString()}</td>
                   <td className="py-2 pr-3">
                     <div className="font-medium">
-                      {studentsById.get(session.studentId)?.fullName ?? session.studentId}
+                      {session.studentName}
                     </div>
                     <div className="text-xs text-[rgb(var(--muted))] font-mono">{session.studentId}</div>
                   </td>
@@ -815,7 +1041,7 @@ export default function AdminSessionsHistoryPage() {
                           <button
                             key={status}
                             className={`btn btn-sm px-2 py-1 text-xs flex-shrink-0 ${statusClass(session.status === status, status)}`}
-                            onClick={() => void updateStatus(session, status)}
+                            onClick={() => void updateStatusForRow(session, status)}
                           >
                             {status.replaceAll("_", " ")}
                           </button>
@@ -827,21 +1053,25 @@ export default function AdminSessionsHistoryPage() {
                     {formatMoneyLKR(session.chargeCents)}
                   </td>
                   <td className="py-2 pr-3 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button className="btn btn-outline" onClick={() => openEdit(session)}>Edit</button>
-                      <button
-                        className="btn btn-ghost"
-                        onClick={() => void deleteSession(session)}
-                        disabled={pendingDelete?.session.id === session.id}
-                      >
-                        {pendingDelete?.session.id === session.id ? 'Pending...' : 'Delete'}
-                      </button>
-                    </div>
+                    {session.isSynthetic ? (
+                      <span className="text-xs text-[rgb(var(--muted))]">-</span>
+                    ) : (
+                      <div className="flex items-center justify-end gap-2">
+                        <button className="btn btn-outline" onClick={() => openEdit(session)}>Edit</button>
+                        <button
+                          className="btn btn-ghost"
+                          onClick={() => void deleteSession(session)}
+                          disabled={pendingDelete?.session.id === session.id}
+                        >
+                          {pendingDelete?.session.id === session.id ? 'Pending...' : 'Delete'}
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
 
-              {!sessionsLoading && filteredSessions.length === 0 ? (
+              {!sessionsLoading && displaySessions.length === 0 ? (
                 <tr>
                   <td className="py-6 text-center text-[rgb(var(--muted))]" colSpan={6}>
                     <div>No sessions found for this filter.</div>

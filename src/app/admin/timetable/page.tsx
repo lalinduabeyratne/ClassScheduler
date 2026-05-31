@@ -196,6 +196,23 @@ function combineDateTimeMs(d: Date, hhmm: string) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh || 0, mm || 0).getTime();
 }
 
+function localDateKeyFromDate(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function parseExceptionDateKey(raw: string) {
+  const match = raw.trim().match(/^(\d{4}-\d{2}-\d{2})\b/);
+  return match?.[1] ?? null;
+}
+
+function slotHasExceptionOnDate(exceptions: string[], date: Date) {
+  const dateKey = localDateKeyFromDate(date);
+  return exceptions.some((entry) => parseExceptionDateKey(entry) === dateKey);
+}
+
 export default function TimetablePage() {
   const router = useRouter();
   const { user, loading } = useAuthUser();
@@ -335,7 +352,9 @@ export default function TimetablePage() {
     for (let i = 0; i < 7; i++) {
       const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
       const wd = d.getDay();
-      const slotsForDay = slots.filter((s) => s.active && s.weekday === wd && s.students.length);
+      const slotsForDay = slots.filter(
+        (s) => s.active && s.weekday === wd && s.students.length && !slotHasExceptionOnDate(s.exceptions, d),
+      );
       for (const slot of slotsForDay) {
         const startAt = combineDateTimeMs(d, slot.startTime);
         const endAt = startAt + slot.duration * 60_000;
@@ -375,9 +394,11 @@ export default function TimetablePage() {
     startTime: string;
     duration: number;
     students: SlotStudent[];
+    exceptions: string[];
   }) {
     const today = new Date();
     if (today.getDay() !== DAY_TO_WEEKDAY[args.day]) return;
+    if (slotHasExceptionOnDate(args.exceptions, today)) return;
     if (args.students.length === 0) return;
 
     const sessionDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -432,6 +453,7 @@ export default function TimetablePage() {
     startTime: string;
     duration: number;
     students: SlotStudent[];
+    exceptions: string[];
     daysAhead?: number;
   }) {
     const daysAhead = Math.max(1, args.daysAhead ?? 35);
@@ -449,6 +471,7 @@ export default function TimetablePage() {
         startDate.getDate() + i,
       );
       if (d.getDay() !== targetWeekday) continue;
+      if (slotHasExceptionOnDate(args.exceptions, d)) continue;
 
       const startAt = combineDateTimeMs(d, args.startTime);
       const endAt = startAt + args.duration * 60_000;
@@ -529,6 +552,7 @@ export default function TimetablePage() {
         startTime: createStartTime,
         duration,
         students: studentsPayload,
+        exceptions: [],
       });
       await rebuildUpcomingSessionsForSlot({
         slotId: slotRef.id,
@@ -536,6 +560,7 @@ export default function TimetablePage() {
         startTime: createStartTime,
         duration,
         students: studentsPayload,
+        exceptions: [],
       });
 
       setCreateStudentIds([]);
@@ -643,6 +668,7 @@ export default function TimetablePage() {
         startTime: draft.startTime,
         duration,
         students: studentsPayload,
+        exceptions: slot.exceptions,
       });
       await rebuildUpcomingSessionsForSlot({
         slotId: slot.id,
@@ -650,7 +676,113 @@ export default function TimetablePage() {
         startTime: draft.startTime,
         duration,
         students: studentsPayload,
+        exceptions: slot.exceptions,
       });
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function changeOneWeekOnly(slot: SlotDoc) {
+    setError(null);
+    if (slot.students.length === 0) {
+      setError("Assign at least one student before making a one-week change.");
+      return;
+    }
+
+    const dateInput = window.prompt(
+      `Enter the class date to change for ${slot.day} in YYYY-MM-DD format.`,
+      localDateKeyFromDate(new Date()),
+    );
+    if (dateInput == null) return;
+
+    const dateKey = dateInput.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+      setError("Use a valid date in YYYY-MM-DD format.");
+      return;
+    }
+
+    const occurrenceDate = new Date(`${dateKey}T12:00:00`);
+    if (Number.isNaN(occurrenceDate.getTime())) {
+      setError("Use a valid date in YYYY-MM-DD format.");
+      return;
+    }
+
+    if (occurrenceDate.getDay() !== DAY_TO_WEEKDAY[slot.day]) {
+      setError(`That date is not a ${slot.day}.`);
+      return;
+    }
+
+    const newStartTime = window.prompt("New start time (HH:MM)", slot.startTime);
+    if (newStartTime == null) return;
+    const newEndTime = window.prompt("New end time (HH:MM)", slot.endTime);
+    if (newEndTime == null) return;
+    const note = window.prompt("Optional note for this one-week change", slot.notes ?? "") ?? "";
+
+    const timeError = validateTimeRange(newStartTime, newEndTime);
+    if (timeError) {
+      setError(timeError);
+      return;
+    }
+
+    const duration = computeDuration(newStartTime, newEndTime);
+    if (duration <= 0) {
+      setError("Duration must match the selected time range.");
+      return;
+    }
+
+    const overlap = findOverlap(slots, {
+      id: slot.id,
+      day: slot.day,
+      startTime: newStartTime,
+      endTime: newEndTime,
+    });
+    if (overlap) {
+      setError(`Overlaps with ${overlap.day} ${overlap.startTime}-${overlap.endTime}.`);
+      return;
+    }
+
+    const updatedException = `${dateKey} | tutor changed to ${newStartTime}-${newEndTime}${note.trim() ? ` | ${note.trim()}` : ""}`;
+    const nextExceptions = [
+      ...slot.exceptions.filter((entry) => parseExceptionDateKey(entry) !== dateKey),
+      updatedException,
+    ];
+
+    setSavingId(slot.id);
+    try {
+      await updateDoc(doc(db, col.timetableSlots(), slot.id), {
+        exceptions: nextExceptions,
+      });
+
+      const feeCache = new Map<string, number>();
+      const startAt = combineDateTimeMs(occurrenceDate, newStartTime);
+      const endAt = combineDateTimeMs(occurrenceDate, newEndTime);
+
+      for (const student of slot.students) {
+        let feePerSessionCents = feeCache.get(student.id);
+        if (feePerSessionCents == null) {
+          const studentSnap = await getDoc(doc(db, col.students(), student.id));
+          feePerSessionCents = studentSnap.exists()
+            ? Math.max(0, Math.trunc(Number((studentSnap.data() as any).feePerSessionCents ?? 0)))
+            : 0;
+          feeCache.set(student.id, feePerSessionCents);
+        }
+
+        const sessionId = `${slot.id}_${student.id}_${yyyymmdd(occurrenceDate)}`;
+        await setDoc(doc(db, col.sessions(), sessionId), {
+          studentId: student.id,
+          slotId: slot.id,
+          startAt,
+          endAt,
+          status: "scheduled",
+          feePerSessionCents,
+          chargeCents: computeChargeCents({ feePerSessionCents, status: "scheduled" }),
+          createdFrom: "manual",
+          notes: note.trim(),
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to apply the one-week change.");
     } finally {
       setSavingId(null);
     }
@@ -1009,6 +1141,13 @@ export default function TimetablePage() {
                               <button
                                 className="btn btn-ghost"
                                 disabled={savingId === slot.id}
+                                onClick={() => changeOneWeekOnly(slot)}
+                              >
+                                Change 1 week
+                              </button>
+                              <button
+                                className="btn btn-ghost"
+                                disabled={savingId === slot.id}
                                 onClick={() => deleteSlot(slot.id)}
                               >
                                 Delete
@@ -1092,6 +1231,13 @@ export default function TimetablePage() {
                                 onClick={() => lockSlot(slot.id)}
                               >
                                 Lock
+                              </button>
+                              <button
+                                className="btn btn-ghost"
+                                disabled={savingId === slot.id}
+                                onClick={() => changeOneWeekOnly(slot)}
+                              >
+                                Change 1 week
                               </button>
                               <button
                                 className="btn btn-ghost"
