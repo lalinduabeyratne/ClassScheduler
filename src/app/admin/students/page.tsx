@@ -205,6 +205,7 @@ export default function AdminStudentsPage() {
   const { data: rawSlots } = useFirestoreQuery<Record<string, unknown>>(slotsQuery);
   const { data: sessions } = useFirestoreQuery<Session>(sessionsQuery);
   const { data: payments } = useFirestoreQuery<Payment>(paymentsQuery);
+  const visibleSessions = useMemo(() => sessions.filter((session) => !session.deletedAt), [sessions]);
 
   const students = useMemo(
     () =>
@@ -277,8 +278,8 @@ export default function AdminStudentsPage() {
   );
 
   const selectedSessions = useMemo(
-    () => (selectedStudentId ? sessions.filter((s) => s.studentId === selectedStudentId) : []),
-    [selectedStudentId, sessions],
+    () => (selectedStudentId ? visibleSessions.filter((s) => s.studentId === selectedStudentId) : []),
+    [selectedStudentId, visibleSessions],
   );
   const selectedPayments = useMemo(
     () => (selectedStudentId ? payments.filter((p) => p.studentId === selectedStudentId) : []),

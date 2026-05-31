@@ -89,6 +89,7 @@ export type Session = {
   coverupScheduledFor?: number; // epoch ms when the make-up is scheduled for
   coverupScheduledAt?: number; // epoch ms when the make-up was scheduled
   coverupCompletedAt?: number; // epoch ms when the make-up was completed
+  deletedAt?: number;
 };
 
 export type Payment = {

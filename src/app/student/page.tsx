@@ -261,15 +261,16 @@ export default function StudentPage() {
     paymentsQuery,
   );
   const { data: reschedules, error: reschedulesError } = useFirestoreQuery<Record<string, unknown>>(reschedulesQuery);
+  const visibleSessions = useMemo(() => sessions.filter((session) => !session.deletedAt), [sessions]);
 
   const balance = useMemo(
-    () => computeStudentBalance({ sessions, payments }),
-    [payments, sessions],
+    () => computeStudentBalance({ sessions: visibleSessions, payments }),
+    [payments, visibleSessions],
   );
   const duePaymentCents = Math.max(0, balance.remainingCents);
   const paymentCoverage = useMemo(
-    () => allocateVerifiedPaymentsOldestFirst({ sessions, payments }),
-    [payments, sessions],
+    () => allocateVerifiedPaymentsOldestFirst({ sessions: visibleSessions, payments }),
+    [payments, visibleSessions],
   );
   const pendingPaymentCents = useMemo(
     () =>
@@ -282,19 +283,19 @@ export default function StudentPage() {
 
   const upcomingSessions = useMemo(() => {
     const nowMs = Date.now();
-    return sessions
+    return visibleSessions
       .filter((s) => (s.startAt ?? 0) > nowMs)
       .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0))
       .slice(0, 10);
-  }, [sessions]);
+  }, [visibleSessions]);
 
   // All upcoming chargeable sessions (for prepaid coverage across all months)
   const allUpcomingChargeableSessions = useMemo(() => {
     const nowMs = Date.now();
-    return sessions
+    return visibleSessions
       .filter((s) => (s.startAt ?? 0) > nowMs && Math.max(0, Number(s.feePerSessionCents ?? 0)) > 0)
       .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0));
-  }, [sessions]);
+  }, [visibleSessions]);
 
   const sessionsPrepaidCoverage = useMemo(() => {
     let remainingCredit = paymentCoverage.remainingCreditCents;
@@ -326,17 +327,17 @@ export default function StudentPage() {
 
   const missedSessions = useMemo(() => {
     const nowMs = Date.now();
-    return sessions
+    return visibleSessions
       .filter((s) => MISSED_STATUSES.has(s.status) && (s.startAt ?? 0) <= nowMs)
       .sort((a, b) => (b.startAt ?? 0) - (a.startAt ?? 0));
-  }, [sessions]);
+  }, [visibleSessions]);
 
   const tutorCanceledSessions = useMemo(() => {
     const nowMs = Date.now();
-    return sessions
+    return visibleSessions
       .filter((s) => s.status === TUTOR_CANCELED_STATUS && (s.startAt ?? 0) <= nowMs)
       .sort((a, b) => (b.startAt ?? 0) - (a.startAt ?? 0));
-  }, [sessions]);
+  }, [visibleSessions]);
 
   const pendingMakeupSessions = useMemo(() => {
     return [...missedSessions, ...tutorCanceledSessions]
@@ -378,7 +379,7 @@ export default function StudentPage() {
   }, [payments]);
 
   const unpaidSessions = useMemo(() => {
-    const chargedSessions = [...sessions]
+    const chargedSessions = [...visibleSessions]
       .filter((session) => Number(session.chargeCents ?? 0) > 0)
       .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0));
 
@@ -405,7 +406,7 @@ export default function StudentPage() {
     return outstanding
       .sort((a, b) => (b.startAt ?? 0) - (a.startAt ?? 0))
       .slice(0, 12);
-  }, [payments, sessions]);
+  }, [payments, visibleSessions]);
 
   const sortedReschedules = useMemo(() => {
     return [...reschedules].sort(

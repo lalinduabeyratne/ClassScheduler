@@ -59,13 +59,14 @@ export default function AdminMissedPage() {
   const { data: sessions, loading: sessionsLoading } = useFirestoreQuery<Session>(sessionsQuery);
   const { byId: studentsById } = useStudentsMap(true);
   const { data: students } = useFirestoreQuery(studentsQuery);
+  const visibleSessions = useMemo(() => sessions.filter((session) => !session.deletedAt), [sessions]);
 
   const missed = useMemo(() => {
     if (!sessions) return [] as Session[];
-    let list = sessions.filter((s) => MISSED_STATUSES.includes(s.status));
+    let list = visibleSessions.filter((s) => MISSED_STATUSES.includes(s.status));
     if (studentFilter !== "all") list = list.filter((s) => s.studentId === studentFilter);
     return list.sort((a, b) => b.startAt - a.startAt);
-  }, [sessions, studentFilter]);
+  }, [studentFilter, visibleSessions]);
 
   const selectedCount = selectedIds.size;
   const selectedSessions = useMemo(() => missed.filter((s) => selectedIds.has(s.id)), [missed, selectedIds]);

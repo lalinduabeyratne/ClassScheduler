@@ -181,6 +181,7 @@ export default function AdminPage() {
   const studentsQuery = useMemo(() => (ready ? qStudents() : null), [ready]);
 
   const { data: todaySessions, loading: todayLoading } = useFirestoreQuery<Session>(todaySessionsQuery);
+  const visibleTodaySessions = useMemo(() => todaySessions.filter((session) => !session.deletedAt), [todaySessions]);
   const { data: monthSessions } = useFirestoreQuery<Session>(monthSessionsQuery);
   const { data: allSessions } = useFirestoreQuery<Session>(allSessionsQuery);
   const { data: allPayments } = useFirestoreQuery<Payment>(allPaymentsQuery);
@@ -317,8 +318,8 @@ export default function AdminPage() {
   }, [parsedPaymentAmountCents, paymentTargetBalance]);
 
   const lateCancelsToday = useMemo(
-    () => todaySessions.filter((s) => s.status === "late_cancel").length,
-    [todaySessions],
+    () => visibleTodaySessions.filter((s) => s.status === "late_cancel").length,
+    [visibleTodaySessions],
   );
 
   async function markSessionStatus(session: Session, status: AttendanceStatus) {
@@ -490,7 +491,7 @@ export default function AdminPage() {
         <div className="card p-6">
           <div className="font-semibold">Today sessions</div>
           <div className="mt-2 text-sm text-[rgb(var(--muted))]">
-            {todayLoading ? "Loading..." : `${todaySessions.length} sessions`}
+            {todayLoading ? "Loading..." : `${visibleTodaySessions.length} sessions`}
           </div>
         </div>
         <div className="card p-6">
@@ -601,7 +602,7 @@ export default function AdminPage() {
           Marking status updates financial charge instantly: attended = 100%, tutor cancel = 0%, early cancel = 0%, late cancel = 50%, no show = 100%.
         </div>
         <div className="mt-3 grid gap-3 md:hidden">
-          {todaySessions.map((s) => (
+          {visibleTodaySessions.map((s) => (
             <div key={s.id} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -653,7 +654,7 @@ export default function AdminPage() {
               </div>
             </div>
           ))}
-          {todaySessions.length === 0 ? (
+          {visibleTodaySessions.length === 0 ? (
             <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] p-4 text-sm text-[rgb(var(--muted))]">
               No sessions found for today.
             </div>
@@ -670,7 +671,7 @@ export default function AdminPage() {
               </tr>
             </thead>
             <tbody>
-              {todaySessions.map((s) => (
+              {visibleTodaySessions.map((s) => (
                 <tr key={s.id} className="border-b border-[rgb(var(--border))]">
                   <td className="py-2 pr-3">{formatTime(s.startAt)}</td>
                   <td className="py-2 pr-3">
@@ -714,7 +715,7 @@ export default function AdminPage() {
                   <td className="py-2 pr-3 text-right font-semibold">{formatMoneyLKR(s.chargeCents)}</td>
                 </tr>
               ))}
-              {todaySessions.length === 0 ? (
+              {visibleTodaySessions.length === 0 ? (
                 <tr>
                   <td className="py-6 text-center text-sm text-[rgb(var(--muted))]" colSpan={4}>
                     No sessions found for today.

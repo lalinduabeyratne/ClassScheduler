@@ -317,6 +317,7 @@ export default function AdminCalendarPage() {
   );
   const { data: weeklyReportSessions } = useFirestoreQuery<Session>(weeklyReportQuery);
   const { students, byId: studentsById } = useStudentsMap(ready);
+  const visibleSessions = useMemo(() => sessions.filter((session) => !session.deletedAt), [sessions]);
 
   const timetableSlots: CalendarSlot[] = useMemo(
     () =>
@@ -359,7 +360,7 @@ export default function AdminCalendarPage() {
       const dateMs = startMs + i * 24 * 60 * 60 * 1000;
       const date = new Date(dateMs);
       const key = new Date(dateMs).toDateString();
-      const daySessions = sessions.filter((session) => new Date(session.startAt).toDateString() === key);
+      const daySessions = visibleSessions.filter((session) => new Date(session.startAt).toDateString() === key);
       const items: CalendarItem[] = [];
 
       for (const session of daySessions) {
@@ -410,19 +411,19 @@ export default function AdminCalendarPage() {
     }
 
     return days;
-  }, [rangeDays, sessions, sessionsBySlotDate, startMs, studentsById, timetableSlots]);
+  }, [rangeDays, sessionsBySlotDate, startMs, studentsById, timetableSlots, visibleSessions]);
 
   const filteredSessions = useMemo(() => {
-    return sessions.filter((session) => {
+    return visibleSessions.filter((session) => {
       if (statusFilter !== "all" && session.status !== statusFilter) return false;
       if (studentFilter !== "all" && session.studentId !== studentFilter) return false;
       return true;
     });
-  }, [sessions, statusFilter, studentFilter]);
+  }, [statusFilter, studentFilter, visibleSessions]);
 
   const activeSession = useMemo(
-    () => sessions.find((s) => s.id === activeSessionId) ?? null,
-    [activeSessionId, sessions],
+    () => visibleSessions.find((s) => s.id === activeSessionId) ?? null,
+    [activeSessionId, visibleSessions],
   );
 
   const activeCalendarItem = useMemo(
@@ -431,14 +432,14 @@ export default function AdminCalendarPage() {
   );
 
   const viewEndHour = useMemo(() => {
-    const latestEndMinutes = sessions.reduce((max, s) => {
+    const latestEndMinutes = visibleSessions.reduce((max, s) => {
       const startMinutes = minutesFromDayStart(s.startAt);
       let endMinutes = minutesFromDayStart(s.endAt);
       if (endMinutes <= startMinutes) endMinutes += 24 * 60;
       return Math.max(max, endMinutes);
     }, BASE_VIEW_END_HOUR * 60);
     return Math.min(30, Math.max(BASE_VIEW_END_HOUR, Math.ceil(latestEndMinutes / 60) + 1));
-  }, [sessions]);
+  }, [visibleSessions]);
 
   const timeLabels = useMemo(() => {
     const labels: Array<{ minutes: number; label: string }> = [];
@@ -465,7 +466,7 @@ export default function AdminCalendarPage() {
     exportTimetableWeeklyReport({
       startDate: reportStartDate,
       endDate: reportEndDate,
-      sessions: weeklyReportSessions,
+      sessions: weeklyReportSessions.filter((session) => !session.deletedAt),
       studentsById,
     });
   }

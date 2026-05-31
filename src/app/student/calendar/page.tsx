@@ -75,13 +75,14 @@ export default function StudentCalendarPage() {
     [accessError, studentId],
   );
   const { data: sessions } = useFirestoreQuery<Session>(sessionsQuery);
+  const visibleSessions = useMemo(() => sessions.filter((session) => !session.deletedAt), [sessions]);
   const { data: payments } = useFirestoreQuery<Payment>(paymentsQuery);
 
   // Calculate prepaid coverage for all upcoming sessions
   const sessionsPrepaidCoverage = useMemo(() => {
-    const paymentCoverage = allocateVerifiedPaymentsOldestFirst({ sessions, payments });
+    const paymentCoverage = allocateVerifiedPaymentsOldestFirst({ sessions: visibleSessions, payments });
     const nowMs = Date.now();
-    const upcomingScheduled = sessions
+    const upcomingScheduled = visibleSessions
       .filter((s) => (s.startAt ?? 0) > nowMs && s.status === "scheduled" && Math.max(0, Number(s.feePerSessionCents ?? 0)) > 0)
       .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0));
 
@@ -98,7 +99,7 @@ export default function StudentCalendarPage() {
     }
 
     return coveredIds;
-  }, [sessions, payments]);
+  }, [payments, visibleSessions]);
 
   const next7Days = useMemo(() => {
     const start = new Date();
@@ -108,10 +109,10 @@ export default function StudentCalendarPage() {
       start.getDate(),
     ).getTime();
     const endMs = startMs + 7 * 24 * 60 * 60 * 1000;
-    return sessions
+    return visibleSessions
       .filter((s) => s.startAt >= startMs && s.startAt < endMs)
       .sort((a, b) => a.startAt - b.startAt);
-  }, [sessions]);
+  }, [visibleSessions]);
 
   const grouped = useMemo(() => {
     const m = new Map<string, Session[]>();

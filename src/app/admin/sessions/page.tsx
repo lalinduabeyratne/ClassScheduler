@@ -270,9 +270,10 @@ export default function AdminSessionsHistoryPage() {
   const projectedTotalCents = projectedChargeCents * selectedBackfillDates.length;
 
   const filteredSessions = useMemo(() => {
+    const visibleSessions = sessions.filter((session) => !session.deletedAt);
     const byStudent = studentFilter === "all"
-      ? sessions
-      : sessions.filter((session) => session.studentId === studentFilter);
+      ? visibleSessions
+      : visibleSessions.filter((session) => session.studentId === studentFilter);
     return [...byStudent].sort((a, b) => b.startAt - a.startAt);
   }, [sessions, studentFilter]);
 
@@ -448,9 +449,7 @@ export default function AdminSessionsHistoryPage() {
       const targetSession = session.isSynthetic
         ? await materializeSyntheticSession(session, status)
         : session;
-      if (!session.isSynthetic) {
-        await updateStatus(targetSession, status);
-      }
+      await updateStatus(targetSession, status);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Failed to update session status.");
     }
@@ -608,6 +607,13 @@ export default function AdminSessionsHistoryPage() {
         coverupScheduledAt: null,
         coverupCompletedAt: null,
       });
+    }
+
+    if (session.createdFrom === "timetable" && session.slotId) {
+      await updateDoc(doc(db, col.sessions(), session.id), {
+        deletedAt: Date.now(),
+      });
+      return;
     }
 
     if (session.createdFromSessionId) {
