@@ -1,6 +1,6 @@
 "use client";
 
-import { collection, deleteDoc, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
+import { arrayUnion, collection, deleteDoc, doc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AdminTopNav } from "@/app/admin/_components/AdminTopNav";
@@ -502,13 +502,13 @@ export default function AdminCalendarPage() {
     });
   }
 
-  async function deleteSession(sessionId: string) {
-    if (!window.confirm("Delete this session record?")) return;
+  async function deleteCalendarOccurrence(item: CalendarItem) {
+    if (!window.confirm("Delete this class occurrence?")) return;
     setActionError(null);
-    const session = sessions.find((s) => s.id === sessionId) ?? null;
+    const session = sessions.find((s) => s.id === item.id) ?? null;
 
     const staleCoverupLinks = await getDocs(
-      query(collection(db, col.sessions()), where("coverupSessionId", "==", sessionId)),
+      query(collection(db, col.sessions()), where("coverupSessionId", "==", item.id)),
     );
 
     for (const snap of staleCoverupLinks.docs) {
@@ -521,44 +521,37 @@ export default function AdminCalendarPage() {
       });
     }
 
+    if (item.slotId) {
+      const occurrenceDate = new Date(item.startAt);
+      const occurrenceDateKey = yyyymmdd(occurrenceDate);
+      try {
+        await updateDoc(doc(db, col.timetableSlots(), item.slotId), {
+          exceptions: arrayUnion(`${occurrenceDateKey} | deleted from calendar`),
+        });
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : "Failed to update timetable exception.");
+        return;
+      }
+    }
+
     if (session?.createdFromSessionId) {
       try {
-        await updateDoc(doc(db, col.sessions(), session.createdFromSessionId), {
+        await setDoc(doc(db, col.sessions(), session.createdFromSessionId), {
           coverupStatus: null,
           coverupSessionId: null,
           coverupScheduledFor: null,
           coverupScheduledAt: null,
           coverupCompletedAt: null,
-        });
+        }, { merge: true });
       } catch (err) {
         setActionError(err instanceof Error ? err.message : "Failed to detach linked make-up session.");
         return;
       }
     }
 
-    await deleteDoc(doc(db, col.sessions(), sessionId));
-  }
-
-  async function deleteLinkedSlot(slotId: string) {
-    if (
-      !window.confirm(
-        "Delete linked timetable slot? This removes the recurring slot definition.",
-      )
-    ) {
-      return;
+    if (session) {
+      await deleteDoc(doc(db, col.sessions(), session.id));
     }
-    setActionError(null);
-    const today = new Date();
-    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-    const sessionsForSlot = query(collection(db, col.sessions()), where("slotId", "==", slotId));
-    const sessionsSnap = await getDocs(sessionsForSlot);
-    for (const d of sessionsSnap.docs) {
-      const data = d.data() as { startAt?: unknown };
-      const startAt = Number(data.startAt ?? 0);
-      if (!Number.isFinite(startAt) || startAt < todayStart) continue;
-      await deleteDoc(doc(db, col.sessions(), d.id));
-    }
-    await deleteDoc(doc(db, col.timetableSlots(), slotId));
   }
 
   function openEditTime(session: Session) {
@@ -991,22 +984,18 @@ export default function AdminCalendarPage() {
                   <option value="no_show">No show</option>
                 </select>
               )}
-              {!activeCalendarItem.isSynthetic ? (
-                <>
-                  <button className="btn btn-ghost text-xs" onClick={() => openEditTime(activeCalendarItem)}>
-                    Edit time
-                  </button>
-                  <button className="btn btn-ghost text-xs" onClick={() => void deleteSession(activeCalendarItem.id)}>
-                    Delete session
-                  </button>
-                </>
-              ) : null}
               {activeCalendarItem.slotId ? (
-                <button
-                  className="btn btn-ghost text-xs"
-                  onClick={() => void deleteLinkedSlot(String(activeCalendarItem.slotId))}
-                >
-                  Delete slot
+                <button className="btn btn-ghost text-xs" onClick={() => void deleteCalendarOccurrence(activeCalendarItem)}>
+                  Delete occurrence
+                </button>
+              ) : (
+                <button className="btn btn-ghost text-xs" onClick={() => openEditTime(activeCalendarItem)}>
+                  Edit time
+                </button>
+              )}
+              {!activeCalendarItem.slotId ? (
+                <button className="btn btn-ghost text-xs" onClick={() => void deleteCalendarOccurrence(activeCalendarItem)}>
+                  Delete session
                 </button>
               ) : null}
             </div>

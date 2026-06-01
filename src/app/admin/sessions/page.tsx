@@ -465,6 +465,17 @@ export default function AdminSessionsHistoryPage() {
     setEditNotes(session.notes ?? '');
   }
 
+  async function openEditForRow(session: SessionListItem) {
+    try {
+      const targetSession = session.isSynthetic
+        ? await materializeSyntheticSession(session, session.status)
+        : session;
+      openEdit(targetSession);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to open session editor.");
+    }
+  }
+
   function closeEdit() {
     setEditingSessionId(null);
   }
@@ -610,9 +621,13 @@ export default function AdminSessionsHistoryPage() {
     }
 
     if (session.createdFrom === "timetable" && session.slotId) {
-      await updateDoc(doc(db, col.sessions(), session.id), {
-        deletedAt: Date.now(),
-      });
+      await setDoc(
+        doc(db, col.sessions(), session.id),
+        {
+          deletedAt: Date.now(),
+        },
+        { merge: true },
+      );
       return;
     }
 
@@ -1059,20 +1074,16 @@ export default function AdminSessionsHistoryPage() {
                     {formatMoneyLKR(session.chargeCents)}
                   </td>
                   <td className="py-2 pr-3 text-right">
-                    {session.isSynthetic ? (
-                      <span className="text-xs text-[rgb(var(--muted))]">-</span>
-                    ) : (
-                      <div className="flex items-center justify-end gap-2">
-                        <button className="btn btn-outline" onClick={() => openEdit(session)}>Edit</button>
-                        <button
-                          className="btn btn-ghost"
-                          onClick={() => void deleteSession(session)}
-                          disabled={pendingDelete?.session.id === session.id}
-                        >
-                          {pendingDelete?.session.id === session.id ? 'Pending...' : 'Delete'}
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex items-center justify-end gap-2">
+                      <button className="btn btn-outline" onClick={() => void openEditForRow(session)}>Edit</button>
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => void deleteSession(session)}
+                        disabled={pendingDelete?.session.id === session.id}
+                      >
+                        {pendingDelete?.session.id === session.id ? 'Pending...' : 'Delete'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
