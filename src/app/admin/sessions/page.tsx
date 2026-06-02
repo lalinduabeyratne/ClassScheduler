@@ -244,6 +244,16 @@ export default function AdminSessionsHistoryPage() {
     [studentRows],
   );
 
+  const sessionFeeByStudentId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const s of sessions) {
+      const fee = Math.max(0, Math.trunc(Number(s.feePerSessionCents ?? 0)));
+      if (fee <= 0) continue;
+      if (!map.has(s.studentId)) map.set(s.studentId, fee);
+    }
+    return map;
+  }, [sessions]);
+
   const selectedBackfillDates = useMemo(
     () =>
       (newSessionDates.length > 0 ? newSessionDates : [newSessionDate])
@@ -423,7 +433,12 @@ export default function AdminSessionsHistoryPage() {
 
     const dateKey = yyyymmdd(new Date(session.startAt));
     const sessionId = `${session.slotId}_${session.studentId}_${dateKey}`;
-    const feePerSessionCents = Math.max(0, Number(studentFeeById.get(session.studentId) ?? 0));
+    const feePerSessionCents = Math.max(
+      0,
+      Number(
+        studentFeeById.get(session.studentId) ?? sessionFeeByStudentId.get(session.studentId) ?? 0,
+      ),
+    );
     const chargeCents = computeChargeCents({ feePerSessionCents, status });
 
     const payload: Omit<Session, "id"> = {
