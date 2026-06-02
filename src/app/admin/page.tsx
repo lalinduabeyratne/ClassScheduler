@@ -245,6 +245,25 @@ export default function AdminPage() {
     [students],
   );
 
+  const sessionFeeByStudentId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const session of allSessions) {
+      const fee = Math.max(0, Math.trunc(Number(session.feePerSessionCents ?? 0)));
+      if (fee <= 0) continue;
+      if (!map.has(session.studentId)) {
+        map.set(session.studentId, fee);
+      }
+    }
+    return map;
+  }, [allSessions]);
+
+  function getFeeSnapshotForStudent(studentId: string) {
+    return Math.max(
+      0,
+      Number(studentFeeById.get(studentId) ?? sessionFeeByStudentId.get(studentId) ?? 0),
+    );
+  }
+
   const timetableSlots = useMemo(
     () =>
       rawSlots.map((slot) => ({
@@ -308,7 +327,7 @@ export default function AdminPage() {
           startAt,
           endAt,
           status: "scheduled",
-          feePerSessionCents: Math.max(0, Number(studentFeeById.get(student.id) ?? 0)),
+          feePerSessionCents: getFeeSnapshotForStudent(student.id),
           chargeCents: 0,
           createdFrom: "timetable",
           isSynthetic: true,
@@ -455,22 +474,22 @@ export default function AdminPage() {
 
   async function markSessionStatus(session: TodaySessionItem, status: AttendanceStatus) {
     setActionError(null);
-    const targetSession = session.isSynthetic
-      ? await materializeSyntheticTodaySession(session as TodaySessionItem, status)
-      : session;
-    if (targetSession.feePerSessionCents <= 0) {
-      setActionError("Cannot calculate fee: this session has no valid base rate.");
-      return;
+    try {
+      const targetSession = session.isSynthetic
+        ? await materializeSyntheticTodaySession(session as TodaySessionItem, status)
+        : session;
+      const chargeCents = computeChargeCents({
+        feePerSessionCents: targetSession.feePerSessionCents,
+        status,
+      });
+      await updateDoc(doc(db, "sessions", targetSession.id), {
+        status,
+        chargeCents,
+        statusUpdatedAt: Date.now(),
+      });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to update attendance.");
     }
-    const chargeCents = computeChargeCents({
-      feePerSessionCents: targetSession.feePerSessionCents,
-      status,
-    });
-    await updateDoc(doc(db, "sessions", targetSession.id), {
-      status,
-      chargeCents,
-      statusUpdatedAt: Date.now(),
-    });
   }
 
   async function materializeSyntheticTodaySession(session: TodaySessionItem, status: AttendanceStatus): Promise<Session> {
@@ -479,7 +498,7 @@ export default function AdminPage() {
 
     const dateKey = yyyymmdd(new Date(session.startAt));
     const sessionId = `${session.slotId}_${session.studentId}_${dateKey}`;
-    const feePerSessionCents = 0;
+    const feePerSessionCents = getFeeSnapshotForStudent(session.studentId);
     const chargeCents = computeChargeCents({ feePerSessionCents, status });
 
     const payload: Omit<Session, "id"> = {
