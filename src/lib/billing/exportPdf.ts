@@ -21,6 +21,12 @@ function money(cents: number) {
   }).format((cents ?? 0) / 100);
 }
 
+function formatContactNumber(contactNumber: string | undefined | null) {
+  const value = String(contactNumber ?? "-").trim();
+  if (value === "-") return value;
+  return value.replace(/\s+/g, "");
+}
+
 function formatDate(ms: number) {
   return new Intl.DateTimeFormat("en-LK", {
     dateStyle: "medium",
@@ -173,6 +179,164 @@ export function exportStudentMonthlyPdf(args: {
   doc.save(`${safeName}_${args.month}_report.pdf`);
 }
 
+export function exportStudentProfileSnapshotPdf(args: {
+  student: MonthlyReportStudent;
+  balance: { totalChargedCents: number; totalPaidCents: number; remainingCents: number };
+  upcomingPrepaid: { paidCount: number; paidCents: number };
+  advanceBalanceCents: number;
+  missedSummary: {
+    totalMissed: number;
+    tutorCanceledCount: number;
+    earlyCancelCount: number;
+    lateCancelCount: number;
+    noShowCount: number;
+    missedRevenueCents: number;
+  };
+  attendance: Array<{
+    date: string;
+    status: string;
+    coverup: string;
+    coverage: string;
+    chargeCents: number;
+  }>;
+  payments: Array<{
+    date: string;
+    type: string;
+    coverage: string;
+    method: string;
+    status: string;
+    slip: string;
+    amountCents: number;
+  }>;
+}) {
+  const doc = new jsPDF();
+  let yPos = 10;
+
+  doc.setFontSize(18);
+  doc.text("Student Profile Snapshot", 14, (yPos += 8));
+  doc.setLineWidth(0.5);
+  doc.line(14, (yPos += 2), 196, yPos);
+
+  yPos += 8;
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text("Student Information", 14, (yPos += 6));
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Name: ${args.student.fullName}`, 14, (yPos += 5));
+  doc.text(`Email: ${args.student.email || "-"}`, 14, (yPos += 4));
+  doc.text(`Parent: ${args.student.parentName || "-"}`, 14, (yPos += 4));
+  doc.text("Contact:", 14, (yPos += 4));
+  doc.setFont("courier", "normal");
+  doc.text(formatContactNumber(args.student.contactNumber), 40, yPos);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Session Duration: ${args.student.sessionDurationMin} minutes`, 14, (yPos += 4));
+  doc.text(`Fee per Session: ${money(args.student.feePerSessionCents)}`, 14, (yPos += 4));
+
+  yPos += 6;
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text("Profile Summary", 14, (yPos += 6));
+  autoTable(doc, {
+    startY: (yPos += 4),
+    head: [["Metric", "Value"]],
+    body: [
+      ["Total charged", money(args.balance.totalChargedCents)],
+      ["Total paid", money(args.balance.totalPaidCents)],
+      ["Remaining balance", money(args.balance.remainingCents)],
+      ["Prepaid for upcoming", `${money(args.upcomingPrepaid.paidCents)} (${args.upcomingPrepaid.paidCount} classes)`],
+      ["Advance balance", money(args.advanceBalanceCents)],
+    ],
+    styles: { fontSize: 10 },
+    columnStyles: { 1: { halign: "right" } },
+  });
+  yPos = (doc as any).lastAutoTable?.finalY ?? yPos;
+
+  yPos += 6;
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text("Missed Classes", 14, (yPos += 6));
+  autoTable(doc, {
+    startY: (yPos += 4),
+    head: [["Metric", "Value"]],
+    body: [
+      ["Total missed", String(args.missedSummary.totalMissed)],
+      ["Tutor canceled", String(args.missedSummary.tutorCanceledCount)],
+      ["Early cancel", String(args.missedSummary.earlyCancelCount)],
+      ["Late cancel", String(args.missedSummary.lateCancelCount)],
+      ["No show", String(args.missedSummary.noShowCount)],
+      ["Missed revenue", money(args.missedSummary.missedRevenueCents)],
+    ],
+    styles: { fontSize: 10 },
+    columnStyles: { 1: { halign: "right" } },
+  });
+  yPos = (doc as any).lastAutoTable?.finalY ?? yPos;
+
+  if (args.attendance.length > 0) {
+    yPos += 6;
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text("Attendance History", 14, (yPos += 6));
+
+    autoTable(doc, {
+      startY: (yPos += 4),
+      head: [["Date", "Status", "Cover-up", "Coverage", "Charge"]],
+      body: args.attendance.map((row) => [
+        row.date,
+        row.status.replaceAll("_", " "),
+        row.coverup,
+        row.coverage,
+        money(row.chargeCents),
+      ]),
+      styles: { fontSize: 9 },
+      columnStyles: {
+        1: { halign: "center" },
+        2: { halign: "center" },
+        3: { halign: "center" },
+        4: { halign: "right" },
+      },
+    });
+    yPos = (doc as any).lastAutoTable?.finalY ?? yPos;
+  }
+
+  if (args.payments.length > 0) {
+    yPos += 6;
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text("Payment History", 14, (yPos += 6));
+
+    autoTable(doc, {
+      startY: (yPos += 4),
+      head: [["Date", "Type", "Coverage", "Method", "Status", "Slip", "Amount"]],
+      body: args.payments.map((row) => [
+        row.date,
+        row.type,
+        row.coverage,
+        row.method,
+        row.status.replaceAll("_", " "),
+        row.slip,
+        money(row.amountCents),
+      ]),
+      styles: { fontSize: 9 },
+      columnStyles: {
+        5: { halign: "center" },
+        6: { halign: "right" },
+      },
+    });
+    yPos = (doc as any).lastAutoTable?.finalY ?? yPos;
+  }
+
+  const reportDate = new Intl.DateTimeFormat("en-LK", {
+    dateStyle: "long",
+  }).format(new Date());
+  doc.setFontSize(9);
+  doc.setTextColor(128, 128, 128);
+  doc.text(`Snapshot generated on ${reportDate}`, 14, 280);
+
+  const safeName = args.student.fullName.replace(/[^\w.-]+/g, "_");
+  doc.save(`${safeName}_profile_snapshot.pdf`);
+}
+
 export function exportStudentComprehensiveReport(args: {
   student: MonthlyReportStudent;
   month: string;
@@ -243,7 +407,10 @@ export function exportStudentComprehensiveReport(args: {
   doc.text(`Name: ${args.student.fullName}`, 14, (yPos += 5));
   doc.text(`Email: ${args.student.email || "-"}`, 14, (yPos += 4));
   doc.text(`Parent: ${args.student.parentName || "-"}`, 14, (yPos += 4));
-  doc.text(`Contact: ${args.student.contactNumber || "-"}`, 14, (yPos += 4));
+  doc.text("Contact:", 14, (yPos += 4));
+  doc.setFont("courier", "normal");
+  doc.text(formatContactNumber(args.student.contactNumber), 40, yPos);
+  doc.setFont("helvetica", "normal");
   doc.text(`Session Duration: ${args.student.sessionDurationMin} minutes`, 14, (yPos += 4));
   doc.text(`Fee per Session: ${money(args.student.feePerSessionCents)}`, 14, (yPos += 4));
 
@@ -405,7 +572,10 @@ export function exportStudentWeeklyReport(args: {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.text(`Week: ${weekLabel}`, 14, 52);
-  doc.text(`Contact: ${args.student.contactNumber || "-"}`, 14, 58);
+  doc.text("Contact:", 14, 58);
+  doc.setFont("courier", "normal");
+  doc.text(formatContactNumber(args.student.contactNumber), 40, 58);
+  doc.setFont("helvetica", "normal");
   doc.text(`Parent: ${args.student.parentName || "-"}`, 14, 64);
   doc.text(`Session duration: ${args.student.sessionDurationMin} minutes`, 14, 70);
   doc.text(`Fee/session: ${money(args.student.feePerSessionCents)}`, 14, 76);

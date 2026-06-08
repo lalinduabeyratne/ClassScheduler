@@ -17,7 +17,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AdminTopNav } from "@/app/admin/_components/AdminTopNav";
 import { computeChargeCents } from "@/lib/billing/fee";
-import { exportStudentComprehensiveReport, exportStudentWeeklyReport } from "@/lib/billing/exportPdf";
+import { exportStudentComprehensiveReport, exportStudentProfileSnapshotPdf } from "@/lib/billing/exportPdf";
 import { allocateVerifiedPaymentsOldestFirst, computeStudentBalance } from "@/lib/billing/rollup";
 import { db, storage } from "@/lib/firebase/client";
 import { createAuthUserWithEmailPassword } from "@/lib/firebase/createAuthUser";
@@ -160,7 +160,6 @@ export default function AdminStudentsPage() {
   const [editSessionDuration, setEditSessionDuration] = useState("");
   const [editAssignedSlotIds, setEditAssignedSlotIds] = useState<string[]>([]);
   const [reportMonth, setReportMonth] = useState(() => yyyymm(new Date()));
-  const [reportWeekDate, setReportWeekDate] = useState(() => isoDate(new Date()));
   const [saving, setSaving] = useState(false);
   const [openingSlipPaymentId, setOpeningSlipPaymentId] = useState<string | null>(null);
 
@@ -787,23 +786,48 @@ export default function AdminStudentsPage() {
     }
   }
 
-  function exportWeeklyReport(phase: "start" | "end") {
+  function exportStudentProfileSnapshot() {
     if (!selectedStudent) {
       setActionError("Select a student before exporting a report.");
       return;
     }
     try {
-      exportStudentWeeklyReport({
+      exportStudentProfileSnapshotPdf({
         student: selectedStudent,
-        weekDate: reportWeekDate,
-        sessions: selectedSessions,
-        phase,
+        balance: selectedBalance,
+        upcomingPrepaid: selectedUpcomingPrepaid,
+        advanceBalanceCents: selectedPaymentCoverage.remainingCreditCents,
+        missedSummary: selectedMissedSummary,
+        attendance: selectedAttendanceView.map((session) => ({
+          date: new Date(session.startAt).toLocaleString("en-LK"),
+          status: session.status,
+          coverup:
+            session.coverupStatus === "scheduled"
+              ? session.coverupSessionId && selectedSessionsById.has(session.coverupSessionId)
+                ? "Scheduled"
+                : "-"
+              : session.coverupStatus === "completed"
+                ? "Covered"
+                : "-",
+          coverage:
+            selectedSessionsPrepaidCoverage.has(session.id) && Math.max(0, Number(session.feePerSessionCents ?? 0)) > 0
+              ? "Already paid"
+              : "-",
+          chargeCents: session.chargeCents ?? 0,
+        })),
+        payments: selectedPayments.map((payment) => ({
+          date: new Date(payment.paidAt).toLocaleDateString("en-LK"),
+          type: (payment.paymentType ?? "single").replaceAll("_", " "),
+          coverage: payment.coverageNote || "-",
+          method: payment.method ? payment.method.replaceAll("_", " ") : "-",
+          status: payment.status,
+          slip: payment.slipPath || payment.slipUrl ? "Available" : "-",
+          amountCents: payment.amountCents,
+        })),
       });
-      setActionSuccess(
-        `${phase === "start" ? "Week start" : "Week end"} report for ${reportWeekDate} exported successfully.`,
-      );
+      setActionSuccess(`Profile snapshot for ${selectedStudent.fullName} exported successfully.`);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to export weekly report.");
+      setActionError(err instanceof Error ? err.message : "Failed to export profile snapshot.");
     }
   }
 
@@ -1186,34 +1210,14 @@ export default function AdminStudentsPage() {
                     <button className="btn btn-primary w-full sm:w-auto" onClick={exportStudentReport} disabled={saving}>
                       Export Monthly Report
                     </button>
+                    <button className="btn btn-primary w-full sm:w-auto" onClick={exportStudentProfileSnapshot} disabled={saving}>
+                      Export Profile Snapshot
+                    </button>
                     <button className="btn btn-ghost w-full sm:w-auto" onClick={onDeactivateStudent} disabled={saving}>
                       Deactivate
                     </button>
                     <button className="btn btn-ghost w-full sm:w-auto" onClick={onDeleteStudentRecord} disabled={saving}>
                       Delete record
-                    </button>
-                  </div>
-                </div>
-                <div className="rounded-lg border border-[rgb(var(--border))] bg-black/5 p-3 dark:bg-white/5">
-                  <div className="text-sm font-semibold">Weekly report</div>
-                  <div className="mt-1 text-xs text-[rgb(var(--muted))]">
-                    Choose any date in the week. The start report shows the planned schedule including make-ups and extra classes. The end report shows attended and cancelled status.
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-end gap-2">
-                    <label className="flex flex-col gap-1 text-xs text-[rgb(var(--muted))]">
-                      Week date
-                      <input
-                        type="date"
-                        className="input w-full sm:w-44"
-                        value={reportWeekDate}
-                        onChange={(e) => setReportWeekDate(e.target.value)}
-                      />
-                    </label>
-                    <button className="btn btn-primary" onClick={() => exportWeeklyReport("start")} disabled={saving}>
-                      Export Week Start Report
-                    </button>
-                    <button className="btn btn-primary" onClick={() => exportWeeklyReport("end")} disabled={saving}>
-                      Export Week End Report
                     </button>
                   </div>
                 </div>
