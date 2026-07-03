@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AdminTopNav } from "@/app/admin/_components/AdminTopNav";
 import { computeMonthlySummary, getMonthlyReportRows, monthKeyFromMs } from "@/lib/billing/monthly";
 import { computeChargeCents } from "@/lib/billing/fee";
-import { exportStudentMonthlyPdf } from "@/lib/billing/exportPdf";
+import { exportAdminMonthlyIncomePdf, exportStudentMonthlyPdf } from "@/lib/billing/exportPdf";
 import { db, storage } from "@/lib/firebase/client";
 import { useAuthUser } from "@/lib/firebase/useAuthUser";
 import {
@@ -651,6 +651,32 @@ export default function AdminPage() {
     });
   }
 
+  function exportMonthlyIncomePdf() {
+    if (!monthlySummaries.length) {
+      setActionError("No monthly data found for the selected month.");
+      return;
+    }
+
+    exportAdminMonthlyIncomePdf({
+      month: selectedMonth,
+      studentSummaries: monthlySummaries.map((row) => ({
+        studentId: row.studentId,
+        studentName: studentsById.get(row.studentId)?.fullName ?? row.studentId,
+        openingBalanceCents: row.openingBalanceCents,
+        totalSessions: row.totalSessions,
+        attendedCount: row.attendedCount,
+        lateCancelCount: row.lateCancelCount,
+        noShowCount: row.noShowCount,
+        totalEarnedCents: row.totalEarnedCents,
+        totalPaidCents: row.totalPaidCents,
+        closingBalanceCents: row.closingBalanceCents,
+        dueCents: row.dueCents,
+        creditCents: row.creditCents,
+      })),
+      payments: allPayments,
+    });
+  }
+
   if (loading || checkingRole) {
     return <div className="text-sm text-[rgb(var(--muted))]">Loading...</div>;
   }
@@ -1154,7 +1180,10 @@ export default function AdminPage() {
       </div>
 
       <div className="card p-6">
-        <div className="font-semibold">Export monthly report (PDF)</div>
+        <div className="font-semibold">Export monthly reports (PDF)</div>
+        <div className="mt-1 text-xs text-[rgb(var(--muted))]">
+          Generate a student report or a month-wide income report for the selected month.
+        </div>
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           <div className="space-y-1">
             <div className="label">Student</div>
@@ -1171,9 +1200,12 @@ export default function AdminPage() {
             <div className="label">Month</div>
             <input className="input" type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} />
           </div>
-          <div className="flex items-end justify-end">
+          <div className="flex flex-col items-stretch justify-end gap-2 md:items-end">
             <button className="btn btn-primary" onClick={exportPdf}>
               Export PDF
+            </button>
+            <button className="btn btn-ghost" onClick={exportMonthlyIncomePdf}>
+              Export income report
             </button>
           </div>
         </div>

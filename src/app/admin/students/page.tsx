@@ -111,7 +111,7 @@ function combineDateTimeMs(d: Date, hhmm: string) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh || 0, mm || 0).getTime();
 }
 
-const MISSED_STATUSES = new Set<Session["status"]>(["early_cancel", "late_cancel", "no_show"]);
+const MISSED_STATUSES = new Set<Session["status"]>(["tutor_cancel", "early_cancel", "late_cancel", "no_show"]);
 
 function extractStoragePathFromSlipUrl(slipUrl: string): string | null {
   try {

@@ -179,6 +179,148 @@ export function exportStudentMonthlyPdf(args: {
   doc.save(`${safeName}_${args.month}_report.pdf`);
 }
 
+export function exportAdminMonthlyIncomePdf(args: {
+  month: string;
+  studentSummaries: Array<{
+    studentId: string;
+    studentName: string;
+    openingBalanceCents: number;
+    totalSessions: number;
+    attendedCount: number;
+    lateCancelCount: number;
+    noShowCount: number;
+    totalEarnedCents: number;
+    totalPaidCents: number;
+    closingBalanceCents: number;
+    dueCents: number;
+    creditCents: number;
+  }>;
+  payments: Payment[];
+}) {
+  const doc = new jsPDF();
+  const monthLabel = new Date(`${args.month}-01T00:00:00`).toLocaleDateString("en-LK", {
+    month: "long",
+    year: "numeric",
+  });
+
+  const monthPayments = args.payments
+    .filter((payment) => monthKeyFromMs(payment.paidAt) === args.month)
+    .sort((a, b) => b.paidAt - a.paidAt);
+  const verifiedPayments = monthPayments.filter((payment) => payment.status === "verified");
+  const pendingPayments = monthPayments.filter((payment) => payment.status === "pending_verification");
+
+  const totalOpeningBalanceCents = args.studentSummaries.reduce((sum, row) => sum + row.openingBalanceCents, 0);
+  const totalEarnedCents = args.studentSummaries.reduce((sum, row) => sum + row.totalEarnedCents, 0);
+  const totalPaidCents = args.studentSummaries.reduce((sum, row) => sum + row.totalPaidCents, 0);
+  const totalDueCents = args.studentSummaries.reduce((sum, row) => sum + row.dueCents, 0);
+  const totalCreditCents = args.studentSummaries.reduce((sum, row) => sum + row.creditCents, 0);
+
+  const paymentMethodSummary = verifiedPayments.reduce(
+    (acc, payment) => {
+      const method = payment.method ?? "unknown";
+      const bucket = acc.get(method) ?? { count: 0, amountCents: 0 };
+      bucket.count += 1;
+      bucket.amountCents += payment.amountCents ?? 0;
+      acc.set(method, bucket);
+      return acc;
+    },
+    new Map<string, { count: number; amountCents: number }>(),
+  );
+
+  doc.setFontSize(18);
+  doc.text("Monthly Income Report", 14, 16);
+  doc.setFontSize(11);
+  doc.text(`Month: ${monthLabel}`, 14, 26);
+  doc.text(`Verified payments: ${verifiedPayments.length}`, 14, 32);
+
+  autoTable(doc, {
+    startY: 40,
+    head: [["Metric", "Value"]],
+    body: [
+      ["Opening balance", money(totalOpeningBalanceCents)],
+      ["Total earned", money(totalEarnedCents)],
+      ["Verified payments received", money(totalPaidCents)],
+      ["Closing due", money(totalDueCents)],
+      ["Closing credit", money(totalCreditCents)],
+      ["Pending payments in month", `${pendingPayments.length} (${money(pendingPayments.reduce((sum, payment) => sum + (payment.amountCents ?? 0), 0))})`],
+    ],
+    styles: { fontSize: 10 },
+    columnStyles: { 1: { halign: "right" } },
+  });
+
+  const paymentSummaryRows = Array.from(paymentMethodSummary.entries()).map(([method, summary]) => [
+    method.replaceAll("_", " "),
+    String(summary.count),
+    money(summary.amountCents),
+  ]);
+
+  if (paymentSummaryRows.length > 0) {
+    autoTable(doc, {
+      startY: (doc as any).lastAutoTable?.finalY ? Number((doc as any).lastAutoTable.finalY) + 8 : 60,
+      head: [["Method", "Count", "Amount"]],
+      body: paymentSummaryRows,
+      styles: { fontSize: 10 },
+      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" } },
+    });
+  }
+
+  const studentRows = args.studentSummaries
+    .slice()
+    .sort((a, b) => b.totalPaidCents - a.totalPaidCents || a.studentName.localeCompare(b.studentName))
+    .map((row) => [
+      row.studentName,
+      row.studentId,
+      String(row.totalSessions),
+      money(row.totalEarnedCents),
+      money(row.totalPaidCents),
+      money(row.dueCents),
+      money(row.creditCents),
+    ]);
+
+  autoTable(doc, {
+    startY: (doc as any).lastAutoTable?.finalY ? Number((doc as any).lastAutoTable.finalY) + 8 : 60,
+    head: [["Student", "ID", "Sessions", "Earned", "Paid", "Due", "Credit"]],
+    body: studentRows,
+    styles: { fontSize: 8.5 },
+    headStyles: { fillColor: [14, 116, 144], textColor: 255, fontStyle: "bold" },
+    columnStyles: {
+      1: { cellWidth: 24 },
+      2: { halign: "right" },
+      3: { halign: "right" },
+      4: { halign: "right" },
+      5: { halign: "right" },
+      6: { halign: "right" },
+    },
+  });
+
+  if (verifiedPayments.length > 0) {
+    autoTable(doc, {
+      startY: Number((doc as any).lastAutoTable?.finalY ?? 60) + 8,
+      head: [["Date", "Student", "Method", "Amount", "Status"]],
+      body: verifiedPayments.map((payment) => [
+        new Date(payment.paidAt).toLocaleDateString("en-LK"),
+        payment.studentId,
+        (payment.method ?? "unknown").replaceAll("_", " "),
+        money(payment.amountCents),
+        payment.status.replaceAll("_", " "),
+      ]),
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [21, 128, 61], textColor: 255, fontStyle: "bold" },
+      columnStyles: { 2: { halign: "center" }, 3: { halign: "right" }, 4: { halign: "center" } },
+    });
+  }
+
+  const reportDate = new Intl.DateTimeFormat("en-LK", {
+    dateStyle: "long",
+    timeStyle: "short",
+  }).format(new Date());
+  doc.setFontSize(8);
+  doc.setTextColor(120, 120, 120);
+  doc.text(`Generated on ${reportDate}`, 14, 285);
+
+  doc.save(`monthly_income_${args.month}.pdf`);
+}
+
 export function exportStudentProfileSnapshotPdf(args: {
   student: MonthlyReportStudent;
   balance: { totalChargedCents: number; totalPaidCents: number; remainingCents: number };
@@ -265,7 +407,6 @@ export function exportStudentProfileSnapshotPdf(args: {
       ["Early cancel", String(args.missedSummary.earlyCancelCount)],
       ["Late cancel", String(args.missedSummary.lateCancelCount)],
       ["No show", String(args.missedSummary.noShowCount)],
-      ["Missed revenue", money(args.missedSummary.missedRevenueCents)],
     ],
     styles: { fontSize: 10 },
     columnStyles: { 1: { halign: "right" } },
