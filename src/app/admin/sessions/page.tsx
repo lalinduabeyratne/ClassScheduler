@@ -139,6 +139,7 @@ export default function AdminSessionsHistoryPage() {
   const [newSessionTime, setNewSessionTime] = useState("18:00");
   const [newSessionTimeUnknown, setNewSessionTimeUnknown] = useState(false);
   const [newSessionDurationMin, setNewSessionDurationMin] = useState("60");
+  const [newSessionFeeLkr, setNewSessionFeeLkr] = useState("0");
   const [newSessionStatus, setNewSessionStatus] = useState<AttendanceStatus>("attended");
   const [newSessionNotes, setNewSessionNotes] = useState("");
   const [creatingSession, setCreatingSession] = useState(false);
@@ -233,6 +234,7 @@ export default function AdminSessionsHistoryPage() {
     if (studentRows.length === 0) return;
     setNewSessionStudentId(studentRows[0].id);
     setNewSessionDurationMin(String(studentRows[0].sessionDurationMin));
+    setNewSessionFeeLkr((studentRows[0].feePerSessionCents / 100).toFixed(2));
   }, [newSessionStudentId, studentRows]);
 
   const selectedStudent = useMemo(
@@ -243,6 +245,11 @@ export default function AdminSessionsHistoryPage() {
     () => new Map(studentRows.map((student) => [student.id, student.feePerSessionCents])),
     [studentRows],
   );
+
+  useEffect(() => {
+    if (!selectedStudent) return;
+    setNewSessionFeeLkr((selectedStudent.feePerSessionCents / 100).toFixed(2));
+  }, [selectedStudent]);
 
   const sessionFeeByStudentId = useMemo(() => {
     const map = new Map<string, number>();
@@ -263,20 +270,21 @@ export default function AdminSessionsHistoryPage() {
   );
 
   const parsedDurationMin = Math.trunc(Number(newSessionDurationMin));
+  const parsedFeePerSessionCents = Math.max(0, Math.trunc(Number(newSessionFeeLkr) * 100));
   const canCreateBackfill = Boolean(
     newSessionStudentId
       && selectedBackfillDates.length > 0
       && (newSessionTimeUnknown || newSessionTime)
       && Number.isFinite(parsedDurationMin)
+      && Number.isFinite(parsedFeePerSessionCents)
       && parsedDurationMin > 0,
   );
   const projectedChargeCents = useMemo(() => {
-    if (!selectedStudent) return 0;
     return computeChargeCents({
-      feePerSessionCents: selectedStudent.feePerSessionCents,
+      feePerSessionCents: parsedFeePerSessionCents,
       status: newSessionStatus,
     });
-  }, [newSessionStatus, selectedStudent]);
+  }, [newSessionStatus, parsedFeePerSessionCents]);
   const projectedTotalCents = projectedChargeCents * selectedBackfillDates.length;
 
   const filteredSessions = useMemo(() => {
@@ -574,12 +582,12 @@ export default function AdminSessionsHistoryPage() {
       return;
     }
 
-    if (student.feePerSessionCents <= 0) {
-      setActionError("This student does not have a fee rate set yet.");
+    if (parsedFeePerSessionCents <= 0) {
+      setActionError("Enter a valid per session fee.");
       return;
     }
 
-    const feePerSessionCents = student.feePerSessionCents;
+    const feePerSessionCents = parsedFeePerSessionCents;
     const chargeCents = computeChargeCents({ feePerSessionCents, status: newSessionStatus });
     const trimmedNotes = newSessionNotes.trim();
     const effectiveNotes = newSessionTimeUnknown
@@ -740,6 +748,17 @@ export default function AdminSessionsHistoryPage() {
                   min="1"
                   value={newSessionDurationMin}
                   onChange={(e) => setNewSessionDurationMin(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="label">Per session fee (LKR)</div>
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={newSessionFeeLkr}
+                  onChange={(e) => setNewSessionFeeLkr(e.target.value)}
                 />
               </div>
             </div>

@@ -112,6 +112,9 @@ function combineDateTimeMs(d: Date, hhmm: string) {
 }
 
 const MISSED_STATUSES = new Set<Session["status"]>(["tutor_cancel", "early_cancel", "late_cancel", "no_show"]);
+const ATTENDANCE_HISTORY_LOOKBACK_DAYS = 15;
+const ATTENDANCE_HISTORY_SESSION_LIMIT = 15;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function extractStoragePathFromSlipUrl(slipUrl: string): string | null {
   try {
@@ -342,7 +345,10 @@ export default function AdminStudentsPage() {
 
   const selectedAttendance = useMemo(
     () => {
-      return [...selectedSessions].sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0)).slice(0, 30);
+      return [...selectedSessions]
+        .sort((a, b) => (b.startAt ?? 0) - (a.startAt ?? 0))
+        .slice(0, ATTENDANCE_HISTORY_SESSION_LIMIT)
+        .sort((a, b) => (a.startAt ?? 0) - (b.startAt ?? 0));
     },
     [selectedSessions],
   );
@@ -1293,6 +1299,9 @@ export default function AdminStudentsPage() {
 
             <div>
               <div className="mb-2 font-medium">Attendance history</div>
+              <div className="mb-2 text-xs text-[rgb(var(--muted))]">
+                Showing the last {ATTENDANCE_HISTORY_SESSION_LIMIT} sessions.
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="text-left text-[rgb(var(--muted))]">
