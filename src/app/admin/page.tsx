@@ -221,6 +221,8 @@ export default function AdminPage() {
   } = useFirestoreQuery<Record<string, unknown>>(pendingReschedulesQuery);
   const { data: rawStudents } = useFirestoreQuery<Record<string, unknown>>(studentsQuery);
   const { data: rawSlots } = useFirestoreQuery<Record<string, unknown>>(slotsQuery);
+  const visibleAllSessions = useMemo(() => allSessions.filter((session) => !session.deletedAt), [allSessions]);
+  const visibleMonthSessions = useMemo(() => monthSessions.filter((session) => !session.deletedAt), [monthSessions]);
 
   const students = useMemo(
     () =>
@@ -247,7 +249,7 @@ export default function AdminPage() {
 
   const sessionFeeByStudentId = useMemo(() => {
     const map = new Map<string, number>();
-    for (const session of allSessions) {
+    for (const session of visibleAllSessions) {
       const fee = Math.max(0, Math.trunc(Number(session.feePerSessionCents ?? 0)));
       if (fee <= 0) continue;
       if (!map.has(session.studentId)) {
@@ -255,7 +257,7 @@ export default function AdminPage() {
       }
     }
     return map;
-  }, [allSessions]);
+  }, [visibleAllSessions]);
 
   function getFeeSnapshotForStudent(studentId: string) {
     return Math.max(
@@ -375,12 +377,12 @@ export default function AdminPage() {
   }, [pendingPayments]);
 
   const monthEarningsCents = useMemo(
-    () => monthSessions.reduce((sum, s) => sum + (s.chargeCents ?? 0), 0),
-    [monthSessions],
+    () => visibleMonthSessions.reduce((sum, s) => sum + (s.chargeCents ?? 0), 0),
+    [visibleMonthSessions],
   );
 
   const totalsToDate = useMemo(() => {
-    const totalEarnedCents = allSessions.reduce((sum, s) => sum + (s.chargeCents ?? 0), 0);
+    const totalEarnedCents = visibleAllSessions.reduce((sum, s) => sum + (s.chargeCents ?? 0), 0);
     const totalPaidCents = allPayments
       .filter((p) => p.status === "verified")
       .reduce((sum, p) => sum + (p.amountCents ?? 0), 0);
@@ -392,11 +394,11 @@ export default function AdminPage() {
       dueCents: Math.max(0, balanceCents),
       creditCents: Math.max(0, -balanceCents),
     };
-  }, [allPayments, allSessions]);
+  }, [allPayments, visibleAllSessions]);
 
   const studentSummaries = useMemo(() => {
     return students.map((student) => {
-      const earned = allSessions
+      const earned = visibleAllSessions
         .filter((s) => s.studentId === student.id)
         .reduce((sum, s) => sum + (s.chargeCents ?? 0), 0);
       const paid = allPayments
@@ -413,7 +415,7 @@ export default function AdminPage() {
         creditCents: Math.max(0, -balanceCents),
       };
     }).sort((a, b) => b.dueCents - a.dueCents);
-  }, [allPayments, allSessions, students]);
+  }, [allPayments, students, visibleAllSessions]);
 
   const outstandingStudents = useMemo(
     () => studentSummaries.filter((s) => s.dueCents > 0),
